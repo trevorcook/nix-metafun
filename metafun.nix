@@ -29,7 +29,8 @@ mkCommand
     ${mkOptionHandler opts}
     if [[ $1 == help ]]; then
       ${mkHelp name arg}
-    elif ${mkArgumentsTest args} ; then
+    elif ${mkArgumentsTest args}
+      then
       ${hook}
       ${if commands == {} then ''
         '' else ''
@@ -42,6 +43,7 @@ mkCommand
         esac
         ''}
     else
+      echo "Argument parse fail"
       echo "${mkUsage name arg}"
     fi
     '';
@@ -80,11 +82,20 @@ mkCommand
       ;;
       '';
 
-  mkArgumentsTest = args:
+  mkArgumentsTest_ = args:
     if isList args then
       ''(( $# >= ${toString (length args)} ))''
     else
       "true" ;
+  mkArgumentsTest = args_:
+    let
+      args = preprocArgs args_ ;
+      argLenTest = "(( $# >= ${toString (length args)} ))";
+    in ''
+      { ${argLenTest} && \
+        ${concatStringsSep "&& \\\n" (imap1 argTest args)}
+      }
+    '';
   mkCommandCase = super: cmd: hook:
     let cmdpath = super + " ... " + cmd; in
     ''
@@ -186,7 +197,7 @@ mkComplete
             mkHook v;
     in mkOptionHandler opts;
   mkCompleteArgs = args_ :
-    let args = if isNull args_ then [] else args_;
+    let args = preprocArgs args_;
     in ''
     case "$COMP_CWORD" in
     ${concatStrings (imap1 mkCompleteArgCase args )}
@@ -194,19 +205,23 @@ mkComplete
         ;;
     esac
     '';
-  mkCompleteArgCase = i: arg:
+  mkCompleteArgCase = i: {type,name,...}:
     let
+      repChoice = ''
+        COMPREPLY=( $(compgen -W "${concatStringsSep " " type}" "${ "$" + toString i}") )
+          '';
       repArgOpt = opt: ''
-        COMPREPLY=( $(compgen ${opt} -W "_arg_ <${arg}>" "${ "$" + toString i}") )
+        COMPREPLY=( $(compgen ${opt} -W "_arg_ <${name}>" "${ "$" + toString i}") )
           '';
       repArg = repArgOpt "";
       repDir = repArgOpt "-d";
       repFile = repArgOpt "-f";
     in ''
       ${toString i} )
-        ${ if arg == "file" then repFile
-             else if arg == "dir" then repDir
-             else repArg }
+        ${ if isList type then repChoice
+           else if type == "file" then repFile
+           else if type == "dir" then repDir
+           else repArg }
         ${mkAddCOMPREPLY_info "ARG_CASE" arg}
         ;;
       '';
@@ -245,12 +260,11 @@ mkComplete
 
 util
 */ #####################################################
-  mkArgsString = args:
-    let bkt = str: ''<${str}> '';
-        bktK = k: v: bkt k;
-    in if isList args then concatStrings (map bkt args)
-      else if isAttrs args then concatStrings (mapAttrsToList bktK args)
-      else "";
+  mkArgsString = args_:
+    let
+      args = preprocArgs args_;
+      bkt = arg: ''<${arg.name}> '';
+    in concatStrings (map bkt args);
   mkCommandsString = commands: if commands == {} then ""
     else ''{${concatStringsSep "|" (attrNames commands)}}'';
   attrNamesString = attrs: concatStringsSep " " (attrNames attrs);
@@ -275,15 +289,32 @@ util
   # args is expected to be a list that can be converted to argtype
   # argtype = {name, desc, type}
   preprocArgs  = map preprocArg;
-  preprocArg =  arg:
-    let specialArgType = str: any (n: n == arg) ["file" "dir"]; in
-    if isString arg then
-      if specialArgType then
-        { name = arg; type = arg; desc = arg; }
-        else { name = arg; type = "other"; desc = arg; }
-      else if isAttrs arg then
-        ({name,desc?name,type}: {inherit name desc type;}) arg
-      else { name = "unknown"; type = "other"; desc = "unknown"; };
+  preprocArg =
+    let
+      isSpecialArgType = type: any (n: n == type) ["file" "dir"];
+      setType = {name, desc?name, type}: {
+        inherit name desc;
+        type = if isList type || isSpecialArgType type then type
+               else "other";
+        };
+      mkAttrs = arg :
+        if isString arg then
+          { name = arg; type = arg; desc = arg; }
+        else if isList arg then
+          { name = "choice"; type = arg; desc = ""; }
+        else arg;
+      in arg: setType ( mkAttrs arg );
+  argTest = i: arg:
+    let
+      param = "$" + (toString i);
+      isChoice = choice: "[[ ${param} == ${choice} ]]";
+    in
+    if isList arg.type then
+      "{ ${concatStringsSep " || " (map isChoice arg.type )}
+       }"
+    else
+      "true";
+
 
   # opts is expected to be an attribute set of opttype, or a list of opts
   # opttype = {}

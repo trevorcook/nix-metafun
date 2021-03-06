@@ -24,9 +24,7 @@ myfun-def = {
     echo -n "The current positional parameter "
     ${showAt}
     '';
-  args = [ "file"
-           "class"
-           /* { name = "class"; type = "file"; desc = "file with class desc."; } */
+  args = [ { name = "experiment"; type = ["mayo" "cheese"]; }
          ];
   commands = {
           connect = {
