@@ -25,8 +25,8 @@ mkCommand
         mkShowArgs "args" ''"$@"'' + ''
         echo "mkAttrCommand: ${name} $args"
         ''
-    }
-    ${mkOptionHandler opts}
+      }
+    ${mkOptionHandler false opts}
     if [[ $1 == help ]]; then
       ${mkHelp name arg}
     elif ${mkArgumentsTest args}
@@ -48,11 +48,11 @@ mkCommand
     fi
     '';
 
-  mkOptionHandler = opts_:
+  mkOptionHandler = nofail: opts_:
     let
       opts = mapAttrsToList preprocOpt opts_;
     in if opts == [] then "" else ''
-  eval set -- "$(${mkGetOpt opts})"
+  eval set -- "$(${mkGetOpt nofail opts})"
   while true; do
     case "$1" in
     ${concatStrings (map mkOptCase opts)}
@@ -64,7 +64,7 @@ mkCommand
   shift
   done
     '';
-  mkGetOpt = opts_ :
+  mkGetOpt = nofail: opts_ :
     let opts = { long = []; short = [];} //
                 groupBy (getAttr "length") opts_;
         # The '+' below stops parsing at first non-option
@@ -73,7 +73,8 @@ mkCommand
         longopt = optionalString (opts.long != []) ''--long ${longs}'';
         longs = concatStringsSep "," (map mkOpt opts.long);
         mkOpt = opt: opt.name + optionalString opt.argument ":";
-    in ''getopt ${shortopt} ${longopt} -- "$@"'';
+        silent = if nofail then "-q" else "";
+    in ''getopt ${silent} ${shortopt} ${longopt} -- "$@"'';
   mkOptCase = opt:
     let hyph = ''-${optionalString (opt.length == "long") "-"}'';
     in ''
@@ -159,8 +160,11 @@ mkHelp
 mkComplete
 */ #####################################################
   mkCommandCompletion = name: def: ''
-    eval set -- "''${COMP_WORDS[@]}"
-    shift
+    for i in $( seq $(( COMP_CWORD + 1 )) ''${#COMP_WORDS[@]} ); do
+      unset COMP_WORDS[$i]
+    done
+    unset COMP_WORDS[0]
+    set -- "''${COMP_WORDS[@]}"
     ${mkCommandCompletion_ name def}
     '';
 
@@ -171,35 +175,29 @@ mkComplete
   mkAttrCommandCompletion = name:
     arg@{ opts?{}, args?[], hook?"", commands?{}, desc?""}: ''
     ${mkClearOptions opts}
-    if (( $COMP_CWORD > 0 )); then
-      if (( $COMP_CWORD <= ${toString (nArgs args)} )); then
-        ${mkCompleteArgs args}
-      else
-        shift ${toString (nArgs args)}
-        (( COMP_CWORD-=${toString (nArgs args)} ))
-        ${mkCompleteCommands commands}
-      fi
+    if (( $# <= ${toString (nArgs args)} )); then
+      ${mkCompleteArgs args}
     else
-      COMPREPLY=( )
-      ${mkAddCOMPREPLY_info "NegCWORD" ""}
-
+      shift ${toString (nArgs args)}
+      # (( COMP_CWORD-=${toString (nArgs args)} ))
+      ${mkCompleteCommands commands}
     fi
     '';
   mkClearOptions  = opts_:
     let opts = mapAttrs mkNoOpt opts_;
         mkHook = v: if isFunction v then
-            {}:"  (( COMP_CWORD-=2 ))"
+            {}:": #  (( COMP_CWORD-=2 ))"
           else
-            "  (( COMP_CWORD-=1 ))";
+            " : # (( COMP_CWORD-=1 ))";
         mkNoOpt = k: v: if isAttrs v then
             v // { hook = mkHook v.hook; }
           else
             mkHook v;
-    in mkOptionHandler opts;
+    in mkOptionHandler true opts;
   mkCompleteArgs = args_ :
     let args = preprocArgs args_;
     in ''
-    case "$COMP_CWORD" in
+    case "$#" in
     ${concatStrings (imap1 mkCompleteArgCase args )}
     *)
         ;;
@@ -222,14 +220,14 @@ mkComplete
            else if type == "file" then repFile
            else if type == "dir" then repDir
            else repArg }
-        ${mkAddCOMPREPLY_info "ARG_CASE" arg}
+        ${mkAddCOMPREPLY_info "ARG_CASE" name}
         ;;
       '';
 
   mkCompleteCommands = commands:
     let cmds = attrNamesString commands;
     in ''
-      if [[ $COMP_CWORD == 1 ]]; then
+      if [[ $# == 1 ]]; then
         COMPREPLY=( $(compgen -W "${cmds}" "$1") )
         ${mkAddCOMPREPLY_info "AT_CMD" cmds}
       else
@@ -244,7 +242,6 @@ mkComplete
     '';
   mkCompleteCommandCase = name: val: ''
     ${name} )
-      (( COMP_CWORD-=1 ))
       shift
       ${mkCommandCompletion_ name val}
       ;;
@@ -271,15 +268,16 @@ util
 
   mkAddCOMPREPLY_info = desc: comps: if !debug then "" else ''
     ${mkShowArgs "args" ''"$@"''}
+    ${mkShowArgs "compwords" ''"''${COMP_WORDS[@]}"''}
     ${mkShowArgs "compgen" ''''$(compgen -W "${comps}" "$1")''}
-    COMPREPLY_INFO=( $args $compgen CWORD:$COMP_CWORD ${desc} )
+    COMPREPLY_INFO=( $args $compgen $compwords CWORD:$COMP_CWORD ${desc} n:$# )
     COMPREPLY+=( "''${COMPREPLY_INFO[@]}" )
     '';
 
   mkShowArgs = var: args: ''
-    ${var}=${var}
+    ${var}="${var}:"
     for arg in ${args}; do
-      ${var}="${"$" + var}:$arg"
+      ${var}="${"$" + var}{$arg}"
       done
     '';
   nArgs = args: if isNull args then 0

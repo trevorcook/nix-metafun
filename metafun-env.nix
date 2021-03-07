@@ -1,8 +1,8 @@
 let
   mkShowArgs = var: args: ''
-    ${var}=${var}
+    ${var}="${var}:"
     for arg in ${args}; do
-      ${var}="${"$" + var}:$arg"
+      ${var}="${"$" + var}{$arg}"
       done
     '';
   showAt = ''
@@ -20,8 +20,7 @@ myfun-def = {
     longopt-c = _ :''echo "longopt-c running (argument is $1)"'';
     };
   hook = ''
-    echo "Body running after option and argument parsing."
-    echo -n "The current positional parameter "
+    echo "In myfun hook. Current positional parameters: "
     ${showAt}
     '';
   args = [ { name = "experiment"; type = ["mayo" "cheese"]; }
@@ -35,8 +34,7 @@ myfun-def = {
             args = ["from" "to"];
             };
           rawcommand = ''
-            echo "This is just a raw command which is run verbatim."
-            echo "command line options will still be passed."
+            echo "In rawcommand, current parameters:"
             ${showAt}
 
           '';
