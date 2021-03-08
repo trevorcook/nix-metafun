@@ -85,18 +85,12 @@ mkCommand
       ;;
       '';
 
-  mkArgumentsTest_ = args:
-    if isList args then
-      ''(( $# >= ${toString (length args)} ))''
-    else
-      "true" ;
   mkArgumentsTest = args_:
     let
       args = preprocArgs args_ ;
       argLenTest = "(( $# >= ${toString (length args)} ))";
     in if isNull args then "true" else ''
-      { ${argLenTest} && \
-        ${concatStringsSep "&& \\\n" (imap1 argTest args)}
+      { ${argLenTest} ${concatStrings (imap1 andArgTest args)}
       }
     '';
   mkCommandCase = super: cmd: hook:
@@ -292,6 +286,8 @@ util
           { inherit opts args hook commands desc; }; in
     if isString arg then cmd1 { hook = arg; }
     else cmd1 arg;
+
+
   # args is expected to be a list that can be converted to argtype
   # argtype = {name, desc, type}
   preprocArgs  = args: if isNull args then args else map preprocArg args;
@@ -310,6 +306,8 @@ util
           { name = "choice"; type = arg; desc = ""; }
         else arg;
       in arg: setType ( mkAttrs arg );
+  andArgTest = i: arg: ''
+    && ${argTest i arg} '';
   argTest = i: arg:
     let
       param = "$" + (toString i);
