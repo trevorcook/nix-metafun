@@ -50,13 +50,13 @@ mkEnvironment {
   passthru = { inherit metafun lib myfun-def;
                myfun = metafun.mkCommand "myfun" myfun-def; };
   shellHook = ''
-    complete -F _myfun-completion myfun
+    complete -F _myfun-completion myfun2
     '';
   paths = [figlet];
   envlib = with metafun; {
-    myfun = mkCommand "myfun" myfun-def;
-    _myfun-completion = mkCommandCompletion "_myfun-completion" myfun-def;
-    /* _myfun-completion2 = myfun _completion; */
+    myfun = myfun-def; #envth now uses metafun for envlib
+    myfun2 = mkCommand "myfun2" myfun-def; 
+
     banner = ''
       echo "/* #####################################################"
       echo "$@" | figlet

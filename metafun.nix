@@ -2,9 +2,6 @@
 let
   debug = false;
   # NOTE:
-  # - Longopts will not tab correctly if argument is given with "=".
-  #   This is from a mismatch in COMP_CWORD before and after getopt.
-  #   Resultingly (( COMP_CWORD-=2 )) takes one too many off.
 
 /* #####################################################
            _     ____                                          _
@@ -15,36 +12,41 @@ let
 
 mkCommand
 */ #####################################################
-  mkCommand = name: x:
-    if isAttrs x then
-      mkAttrCommand name x
-    else x;
-  mkAttrCommand = name: arg@{ opts?{}, args?[], hook?"", commands?{}
-                            , desc?""}: ''
+  mkCommand-withComplete = name: cmd_: ''
+    if [[ $1 != _complete ]]; then
+      ${mkCommand name cmd_ }
+    else
+      ${mkCommandCompletion name cmd_}
+    fi
+    '';
+
+
+  mkCommand = name: cmd_:
+    let cmd = preprocCommand cmd_; in  ''
     ${if !debug then "" else
         mkShowArgs "args" ''"$@"'' + ''
         echo "mkAttrCommand: ${name} $args"
         ''
       }
-    ${mkOptionHandler false opts}
+    ${mkOptionHandler false cmd.opts}
     if [[ $1 == help ]]; then
-      ${mkHelp name arg}
-    elif ${mkArgumentsTest args}
+      ${mkHelp name cmd}
+    elif ${mkArgumentsTest cmd.args}
       then
-      ${hook}
-      ${if commands == {} then ''
+      ${cmd.hook}
+      ${if cmd.commands == {} then ''
         '' else ''
-        shift ${toString (nArgs args)}
+        shift ${toString (nArgs cmd.args)}
         case "$1" in
-          ${concatStrings (mapAttrsToList (mkCommandCase name) commands)}
+          ${concatStrings (mapAttrsToList (mkCommandCase name) cmd.commands)}
           * )
-          echo "${mkUsage name arg}"
+          echo "${mkUsage name cmd}"
           ;;
         esac
         ''}
     else
       echo "Argument parse fail"
-      echo "${mkUsage name arg}"
+      echo "${mkUsage name cmd}"
     fi
     '';
 
@@ -92,7 +94,7 @@ mkCommand
     let
       args = preprocArgs args_ ;
       argLenTest = "(( $# >= ${toString (length args)} ))";
-    in ''
+    in if isNull args then "true" else ''
       { ${argLenTest} && \
         ${concatStringsSep "&& \\\n" (imap1 argTest args)}
       }
@@ -261,7 +263,8 @@ util
     let
       args = preprocArgs args_;
       bkt = arg: ''<${arg.name}> '';
-    in concatStrings (map bkt args);
+    in if isNull args then " "
+       else concatStrings (map bkt args);
   mkCommandsString = commands: if commands == {} then ""
     else ''{${concatStringsSep "|" (attrNames commands)}}'';
   attrNamesString = attrs: concatStringsSep " " (attrNames attrs);
@@ -284,9 +287,14 @@ util
                   else if isAttrs args then length (attrNames args)
                   else length args;
 
+  preprocCommand = arg:
+    let cmd1 = {opts?{}, args?null, hook?"",commands?{}, desc?""} :
+          { inherit opts args hook commands desc; }; in
+    if isString arg then cmd1 { hook = arg; }
+    else cmd1 arg;
   # args is expected to be a list that can be converted to argtype
   # argtype = {name, desc, type}
-  preprocArgs  = map preprocArg;
+  preprocArgs  = args: if isNull args then args else map preprocArg args;
   preprocArg =
     let
       isSpecialArgType = type: any (n: n == type) ["file" "dir"];
@@ -342,4 +350,4 @@ util
 
 
 
-in { inherit mkCommand mkCommandCompletion; }
+in { inherit mkCommand mkCommand-withComplete mkCommandCompletion; }
