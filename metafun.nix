@@ -1,7 +1,5 @@
-{lib}: with builtins; with lib;
+{lib, debug?false}: with builtins; with lib;
 let
-  debug = false;
-  # NOTE:
 
 /* #####################################################
            _     ____                                          _
@@ -19,7 +17,6 @@ mkCommand
       ${mkCommandCompletion name cmd_}
     fi
     '';
-
 
   mkCommand = name: cmd_:
     let cmd = preprocCommand cmd_; in  ''
@@ -40,13 +37,16 @@ mkCommand
         case "$1" in
           ${concatStrings (mapAttrsToList (mkCommandCase name) cmd.commands)}
           * )
+          echo "Command unrecognized."
           echo "${mkUsage name cmd}"
+          echo "See: ${name} help"
           ;;
         esac
         ''}
     else
-      echo "Argument parse fail"
+      echo "Argument parse fail."
       echo "${mkUsage name cmd}"
+      echo "See: ${name} help."
     fi
     '';
 
@@ -199,7 +199,7 @@ mkComplete
         ;;
     esac
     '';
-  mkCompleteArgCase = i: {type,name,...}:
+  mkCompleteArgCase = i: {type,name,hook?"",...}:
     let
       repChoice = ''
         COMPREPLY=( $(compgen -W "${concatStringsSep " " type}" "${ "$" + toString i}") )
@@ -207,6 +207,10 @@ mkComplete
       repArgOpt = opt: ''
         COMPREPLY=( $(compgen ${opt} -W "_arg_ <${name}>" "${ "$" + toString i}") )
           '';
+      repArgHook = ''
+        COMPREPLY=( $(compgen -W "$( ${hook} )" "${ "$" + toString i}") )
+                    '';
+
       repArg = repArgOpt "";
       repDir = repArgOpt "-d";
       repFile = repArgOpt "-f";
@@ -215,6 +219,7 @@ mkComplete
         ${ if isList type then repChoice
            else if type == "file" then repFile
            else if type == "dir" then repDir
+           else if type == "hook" then repArgHook
            else repArg }
         ${mkAddCOMPREPLY_info "ARG_CASE" name}
         ;;
@@ -293,10 +298,11 @@ util
   preprocArgs  = args: if isNull args then args else map preprocArg args;
   preprocArg =
     let
-      isSpecialArgType = type: any (n: n == type) ["file" "dir"];
-      setType = {name, desc?name, type}: {
-        inherit name desc;
+      isSpecialArgType = type: any (n: n == type) ["file" "dir" "hook"];
+      setType = {name, desc?name, type?null, hook?null}: {
+        inherit name desc hook;
         type = if isList type || isSpecialArgType type then type
+               else if !(isNull hook) then "hook"
                else "other";
         };
       mkAttrs = arg :

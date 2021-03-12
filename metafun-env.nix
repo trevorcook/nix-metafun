@@ -24,7 +24,7 @@ myfun-def = {
     ${showAt}
     '';
   args = [ { name = "experiment"; type = ["mayo" "cheese"]; }
-         ];
+           { name = "code"; hook = "echo code1 codeb"; }];
   commands = {
           connect = {
             opts = { j = { hook = "echo running option j hook";
@@ -54,8 +54,9 @@ mkEnvironment {
     '';
   paths = [figlet];
   envlib = with metafun; {
-    myfun = myfun-def; #envth now uses metafun for envlib
-    myfun2 = mkCommand "myfun2" myfun-def; 
+    #myfun = myfun-def; #envth now uses metafun for envlib
+    myfun2 = mkCommand "myfun2" myfun-def;
+    _myfun-completion = mkCommandCompletion "_myfun-completion" myfun-def;
 
     banner = ''
       echo "/* #####################################################"
