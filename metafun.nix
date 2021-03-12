@@ -122,7 +122,7 @@ mkHelp
     ${mkOptsHelp opts}
 
     commands:
-    ${concatStrings (mapAttrsToList commandAbout commands)}
+    ${concatStringsSep "\n" (mapAttrsToList commandAbout commands)}
     EOF
     '';
   mkOptsHelp = opts_:
