@@ -55,6 +55,11 @@ mkCommand
       opts = mapAttrsToList preprocOpt opts_;
     in if opts == [] then "" else ''
   eval set -- "$(${mkGetOpt nofail opts})"
+  ${if !debug then "" else
+      mkShowArgs "args" ''"$@"'' + ''
+      echo "postOpt parse: ${name} $args"
+      ''
+  }
   while true; do
     case "$1" in
     ${concatStrings (map mkOptCase opts)}
@@ -123,6 +128,8 @@ mkHelp
 
     commands:
     ${concatStringsSep "\n" (mapAttrsToList commandAbout commands)}
+
+    See 'textgen <command> help' for specific subcommand.
     EOF
     '';
   mkOptsHelp = opts_:

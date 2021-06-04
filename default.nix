@@ -1,1 +1,1 @@
-import metafun.nix
+import ./metafun.nix
