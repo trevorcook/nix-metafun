@@ -19,16 +19,18 @@ mkCommand
     '';
 
   mkCommand = name: cmd_:
-    let cmd = preprocCommand cmd_; in  ''
+    let
+      cmd = preprocCommand cmd_;
+      helpopts = makeHelpOptions name cmd;
+    in ''
     ${if !debug then "" else
         mkShowArgs "args" ''"$@"'' + ''
         echo "mkAttrCommand: ${name} $args"
         ''
       }
-    ${mkOptionHandler false cmd.opts}
-    if [[ $1 == help ]]; then
-      ${mkHelp name cmd}
-    elif ${mkArgumentsTest cmd.args}
+    #''${cmd.preOptHook}
+    ${mkOptionHandler name false (helpopts // cmd.opts)}
+    if ${mkArgumentsTest cmd.args}
       then
       ${cmd.hook}
       ${if cmd.commands == {} then ''
@@ -39,20 +41,24 @@ mkCommand
           * )
           echo "Command unrecognized."
           echo "${mkUsage name cmd}"
-          echo "See: ${name} help"
+          echo "See: ${name} --help"
           ;;
         esac
         ''}
     else
       echo "Argument parse fail."
       echo "${mkUsage name cmd}"
-      echo "See: ${name} help."
+      echo "See: ${name} --help."
     fi
     '';
 
-  mkOptionHandler = nofail: opts_:
+
+  mkOptionHandler = name: nofail: opts_:
     let
-      opts = mapAttrsToList preprocOpt opts_;
+      opts = ingress.opts opts_;
+      setvars = concatMap (s: if s.set == null then [] else [s.set]) opts;
+      preOptHook = if setvars == [] then "" else
+        ''unset ${concatStringsSep " " setvars}'';
     in if opts == [] then "" else ''
   eval set -- "$(${mkGetOpt nofail opts})"
   ${if !debug then "" else
@@ -60,6 +66,7 @@ mkCommand
       echo "postOpt parse: ${name} $args"
       ''
   }
+  ${preOptHook}
   while true; do
     case "$1" in
     ${concatStrings (map mkOptCase opts)}
@@ -125,26 +132,30 @@ mkHelp
     ${mkUsage name arg}
     opts:
     ${mkOptsHelp opts}
+    ${if commands == {} then "" else ''
 
     commands:
     ${concatStringsSep "\n" (mapAttrsToList commandAbout commands)}
-
-    See 'textgen <command> help' for specific subcommand.
+    ''}
+    See '${name} --help' for specific subcommand.
     EOF
+    # Try to return in case is a function, else exit
+    return &> /dev/null
+    exit
     '';
   mkOptsHelp = opts_:
    let
-     opts = mapAttrsToList preprocOpt opts_;
+     opts = ingress.opts opts_;
      hyph = opt: ''-${optionalString (opt.length == "long") "-"}'';
      mk = opt: "  ${(hyph opt) + opt.name} : ${opt.desc}";
    in concatStringsSep "\n" (map mk opts);
 
   commandAttrAbout = name: {desc?"", ...}:
-  "  ${name} : ${desc}\n";
+  "  ${name} : ${desc}";
   commandAbout = name: arg:
     if isAttrs arg then
       commandAttrAbout name arg
-    else "  ${name} :\n";
+    else "  ${name} :";
   mkUsage = name : { commands?{}, args?[], opts?{}, ... }:
     ''usage: ${name} [opts] ${mkArgsString args}${mkCommandsString commands}
     '';
@@ -161,23 +172,156 @@ mkHelp
 |_| |_| |_|_|\_\\____\___/|_| |_| |_| .__/|_|\___|\__\___|
                                     |_|
 mkComplete
+
 */ #####################################################
-  mkCommandCompletion = name: def: ''
+  mkCommandCompletion = handler.completion.command-COMP_WORDS;
+
+  # Replace input arguments with COMP_WORDS vector and call the handler.
+  handler.completion.command-COMP_WORDS  = name: cmd: ''
     for i in $( seq $(( COMP_CWORD + 1 )) ''${#COMP_WORDS[@]} ); do
       unset COMP_WORDS[$i]
     done
     unset COMP_WORDS[0]
     set -- "''${COMP_WORDS[@]}"
-    ${mkCommandCompletion_ name def}
+    ${handler.completion.command name cmd}
     '';
 
-  mkCommandCompletion_ = name: def:
-    if isAttrs def then
-      mkAttrCommandCompletion name def
-    else mkAttrCommandCompletion name { hook = def; };
-  mkAttrCommandCompletion = name:
+  #METAFUN Completion Variable
+  st = "METAFUN_COMPLETION";
+  stV = "$" + st;
+
+  handler.completion.command = name: cmd_:
+    let cmd = ingress.command cmd_;
+    in ''
+      COMPREPLY=( )
+      ${handler.completion.opt cmd}
+      ${handler.completion.args cmd}
+      ${handler.completion.subcommand cmd}
+      '';
+  handler.completion.opt = cmd@{opts,...}:
+    let
+      test.isopt = str: ''[[ -n "''${${str}#-}"]]'';
+      mkOptArg = opt:
+        let hyph = ''-${optionalString (opt.length == "long") "-"}'';
+        in hyph + opt.name;
+      opt-args = map mkOptArg opts;
+      opt-case = opt: ''
+        ${mkOptArg opt})
+          COMPREPLY=( )
+          ${if opt.argument then ''
+          shift
+          [[ $1 == "=" ]] && shift
+          if [[ $# == 1 ]]; then
+            COMPREPLY+=( _ ${mkOptArg opt}_arg{$1} )
+            # DoCompletion
+            shift
+          else
+            shift
+          fi
+          '' else ''
+          shift
+          ''}
+          ;;
+          '';
+    in ''
+      declare ${st}="opts"
+      while [[ ${stV} == opts ]]; do
+        if [[ $# == 0 ]] ; then
+          ${st}=args
+        else
+          ${compreply.choice opt-args "-- $1"}
+          declare nreply=''${#COMPREPLY[@]}
+          declare opt="$1"
+          if [[ -z "$1" ]]; then
+            ${st}=args
+          elif [[ $nreply == 0 ]]; then #No completion
+            ${st}=args
+          elif [[ $nreply == 1 ]]; then #Is option
+            case "$1" in
+            ${ concatStrings (map opt-case opts ) }
+            *)
+              ${st}=exit
+              ;;
+            esac
+          else
+            ${st}=args
+          fi
+        fi
+      done
+      '';
+
+  handler.completion.args = cmd:
+    let
+      nArgs = if isNull cmd.args then 0 else length cmd.args;
+      arg-case = i: {type,name,hook?"",...}:
+        let param= "-- $" + (toString i); in ''
+        ${toString i} )
+          ${ if isList type then compreply.choice type param
+             else if type == "file" then compreply.file "<arg:${name}> _file_" param
+             else if type == "dir" then compreply.dir "<arg:${name}> _dir_" param
+             else if type == "hook" then compreply.hook hook param
+             else compreply.compgen-opts ''-W "<arg:${name}> _"'' param }
+        ;;
+      '';
+    in if nArgs == 0 then
+      ''${st}=cmd
+      ''
+    else ''
+    ############################################
+    ## parse args. If params are args, complete
+    ## and exit. Else, shift out arguments and
+    ## complete subcommand.
+    if [[ ${stV} == args ]]; then
+      ${st}=exit
+      case "$#" in
+      ${ concatStrings (imap1 arg-case cmd.args ) }
+      *)
+        shift ${toString nArgs}
+        ${st}=cmd
+        ;;
+      esac
+    fi
+    '';
+    handler.completion.subcommand = cmd:
+    let command-case = name: subcommand: ''
+    ${name} )
+      shift
+      ${handler.completion.command name subcommand}
+      ;;
+    '';
+    in ''
+    if [[ ${stV} == cmd ]]; then
+      if [[ $# == 1 ]]; then
+        ${compreply.choice (attrNames cmd.commands) "-- $1"}
+      else
+        case "$1" in
+        ${concatStrings (mapAttrsToList command-case cmd.commands)}
+        * )
+          ${st}=exit
+        ;;
+        esac
+      fi
+    fi
+  '';
+
+
+  compreply.choice = choices:
+    compreply.compgen-opts ''-W "${concatStringsSep " " choices}"'';
+  compreply.hook = hook:
+    compreply.compgen-opts ''-W "$( ${hook} )"'';
+  compreply.file = hint:
+    compreply.compgen-opts ''-f -W "${hint}"'';
+  compreply.dir = hint:
+    compreply.compgen-opts ''-d -W "${hint}"'';
+  compreply.compgen-opts = opts: arg:
+    ''COMPREPLY+=( $(compgen ${opts} ${arg}) )'';
+
+  safeexit = ''{ return &> /dev/null || exit ; }'';
+
+
+  /* mkAttrCommandCompletion = name:
     arg@{ opts?{}, args?[], hook?"", commands?{}, desc?""}: ''
-    ${mkClearOptions opts}
+    ${mkClearOptions name opts}
     if (( $# <= ${toString (nArgs args)} )); then
       ${mkCompleteArgs args}
     else
@@ -185,8 +329,8 @@ mkComplete
       # (( COMP_CWORD-=${toString (nArgs args)} ))
       ${mkCompleteCommands commands}
     fi
-    '';
-  mkClearOptions  = opts_:
+    ''; */
+  /* mkClearOptions  = name: opts_:
     let opts = mapAttrs mkNoOpt opts_;
         mkHook = v: if isFunction v then
             {}:": #  (( COMP_CWORD-=2 ))"
@@ -196,8 +340,8 @@ mkComplete
             v // { hook = mkHook v.hook; }
           else
             mkHook v;
-    in mkOptionHandler true opts;
-  mkCompleteArgs = args_ :
+    in mkOptionHandler name true opts; */
+  /* mkCompleteArgs = args_ :
     let args = preprocArgs args_;
     in ''
     case "$#" in
@@ -205,8 +349,8 @@ mkComplete
     *)
         ;;
     esac
-    '';
-  mkCompleteArgCase = i: {type,name,hook?"",...}:
+    ''; */
+  /* mkCompleteArgCase = i: {type,name,hook?"",...}:
     let
       repChoice = ''
         COMPREPLY=( $(compgen -W "${concatStringsSep " " type}" "${ "$" + toString i}") )
@@ -230,9 +374,9 @@ mkComplete
            else repArg }
         ${mkAddCOMPREPLY_info "ARG_CASE" name}
         ;;
-      '';
+      ''; */
 
-  mkCompleteCommands = commands:
+  /* mkCompleteCommands = commands:
     let cmds = attrNamesString commands;
     in ''
       if [[ $# == 1 ]]; then
@@ -247,13 +391,13 @@ mkComplete
         ;;
         esac
       fi
-    '';
-  mkCompleteCommandCase = name: val: ''
+    ''; */
+  /* mkCompleteCommandCase = name: val: ''
     ${name} )
       shift
       ${mkCommandCompletion_ name val}
       ;;
-    '';
+    ''; */
 
 
 /* #####################################################
@@ -293,16 +437,35 @@ util
                   else if isAttrs args then length (attrNames args)
                   else length args;
 
-  preprocCommand = arg:
-    let cmd1 = {opts?{}, args?null, hook?"",commands?{}, desc?""} :
-          { inherit opts args hook commands desc; }; in
-    if isString arg then cmd1 { hook = arg; }
-    else cmd1 arg;
+  /* preprocCommand = arg:
+    let
+      toCmd = {
+        opts?{}, args?null, hook?"",commands?{}, desc?""
+        preOptHook?""
+      } : {
+        inherit opts args hook commands desc
+          preOptHook;
+      };
+    in
+    if isString arg then toCmd { hook = arg; }
+    else toCmd arg; */
+
+  makeHelpOptions = name: attrs:
+    let
+      opt = {
+        desc = "Show this help text.";
+        hook = mkHelp name (recursiveUpdate {opts = out;} attrs);
+      };
+      out = {
+        help = opt;
+        h = opt;
+      };
+    in out;
 
 
   # args is expected to be a list that can be converted to argtype
   # argtype = {name, desc, type}
-  preprocArgs  = args: if isNull args then args else map preprocArg args;
+  /* preprocArgs  = args: if isNull args then args else map preprocArg args;
   preprocArg =
     let
       isSpecialArgType = type: any (n: n == type) ["file" "dir" "hook"];
@@ -318,7 +481,7 @@ util
         else if isList arg then
           { name = "choice"; type = arg; desc = ""; }
         else arg;
-      in arg: setType ( mkAttrs arg );
+      in arg: setType ( mkAttrs arg ); */
   andArgTest = i: arg: ''
     && ${argTest i arg} '';
   argTest = i: arg:
@@ -333,31 +496,57 @@ util
       "true";
 
 
-  # opts is expected to be an attribute set of opttype, or a list of opts
-  # opttype = {}
-  preprocOpts = opts: if isAttrs opts then
-      mapAttrsToList preprocOpt opts
-    else if isList opts then
-      concatMap preprocOpts opts
-    else [];
-  preprocOpt = k: v:
+  # Sanatize inputs for the mkCommand et. al. functions.
+  ingress.command = cmd_ :
     let
-      hook_ = if isAttrs v && hasAttr "hook" v then v.hook else v;
-      desc = if isAttrs v && hasAttr "desc" v then v.desc else "";
-    in
-  rec {
-    inherit desc;
-    name = k;
-    length = if stringLength k > 1 then "long" else "short";
-    argument = isFunction hook_;
-    hook = if argument then
-        ''shift
-        '' + (hook_ {})
-      else
-        hook_;
-    };
+      defaults = {
+        opts?{}, args?null, hook?":",commands?{}, desc?"" preOptHook?""
+        } : {
+          inherit hook commands desc preOptHook;
+          opts = ingress.opts opts;
+          args = ingress.args args;
+        };
+      out = if isString cmd_ then defaults { hook = cmd_; }
+             else defaults cmd_;
+    in out;
 
-
+  ingress.opts = mapAttrsToList ingress.opt;
+  ingress.opt = name:
+      let
+        go = { desc?"", argument?false, hook?":",set?null
+          }: let out = {
+          inherit desc set name;
+          argument = isFunction hook || argument || isFunction set;
+          hook = ''${doSet out.argument set}
+                   ${if isFunction hook then "shift\n" + (hook {}) else hook}
+                   '';
+          length = if stringLength name > 1 then "long" else "short";
+          }; in out;
+        doHook = hook: { inherit hook; };
+        doSet = argument: var: if isFunction var then
+            ''declare ${var {}}="$1"''
+          else if argument && isString var then
+            ''declare ${var}="$1"''
+          else if isString var then
+            ''declare ${var}=true''
+          else "";
+      in arg: go (if isAttrs arg then arg
+                  else doHook arg);
+  ingress.args = args_ : if isNull args_ then args_ else map ingress.arg args_;
+  ingress.arg =
+      let
+        isSpecialArgType = type: any (n: n == type) ["file" "dir" "hook"];
+        go = {name, desc?name, type?null, hook?null}: {
+          inherit name desc hook;
+          type = if isList type || isSpecialArgType type then type
+                 else if !(isNull hook) then "hook"
+                 else "other";
+          };
+      in arg_: go ( if isString arg_ then
+            { name = arg_; type = arg_; desc = arg_; }
+          else if isList arg_ then
+            { name = "choice"; type = arg_; desc = ""; }
+          else arg_ );
 
 
 
