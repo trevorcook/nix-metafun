@@ -15,7 +15,7 @@ mkEnvironment rec {
   argsOnly_values = "option_a option_b";
   shellHook = ''
     metafun-ref(){
-      ''${passthru.metafun-ref}
+      ${passthru.metafun-ref}
     }
     _metafun-ref-completion(){
       ${passthru.metafun-ref-completion}
