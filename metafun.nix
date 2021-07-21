@@ -1,4 +1,4 @@
-{lib, debug?false}: with builtins; with lib;
+{lib}: with builtins; with lib;
 let
 
 /* #####################################################
@@ -15,12 +15,12 @@ mkCommand
   command.command = name: cmd_:
     let
       cmd = ingress.command name cmd_ ;
-      mkCommandCase = super: cmd: hook:
-        let cmdpath = super + " ... " + cmd; in
+      mkCommandCase = super: cmd_name: cmd:
+        let cmdpath = super + " ... " + cmd_name; in
         ''
-        ${cmd} )
+        ${cmd_name} )
         shift
-        ${mkCommand cmdpath hook}
+        ${command.command cmdpath cmd}
         ;;
         '';
     in ''
@@ -54,9 +54,7 @@ mkCommand
       setvars = concatMap (s: if s.set == null then [] else [s.set]) opts;
       preOptHook = if setvars == [] then "" else
         ''unset ${concatStringsSep " " setvars}'';
-      mkOptCase = opt:
-        let hyph = ''-${optionalString (opt.length == "long") "-"}'';
-        in ''
+      mkOptCase = opt: ''
           ${hyphenate opt.name})
             ${opt.hook}
           ;;
@@ -118,48 +116,57 @@ mkCommand
 help.help
 */ #####################################################
 
-  help.help = name: arg@{ commands ? {}, desc?"", opts?[], ... } : ''
+  help.help = name: cmd: ''
     cat <<'EOF'
-    ${name + ": " + desc}
-
-    ${help.usage name arg}
-    opts:
-    ${help.opts opts}
-    ${if commands == {} then "" else ''
-
-    commands:
-    ${concatStringsSep "\n" (mapAttrsToList commandAbout commands)}
-    ''}
-    See '${name} --help' for specific subcommand.
+    ${concatStrings [
+      (help.head name cmd)
+      (help.usage name cmd)
+      (help.opts cmd.opts)
+      (help.commands cmd)
+      (help.foot name)
+      ]}
     EOF
-    # Try to return in case is a function, else exit
-    return &> /dev/null
-    exit
+    ${safeexit}
     '';
-  help.opts = opts:
+  help.head = name: cmd: name + ": " + cmd.desc + "\n\n";
+  help.usage = name : cmd:
    let
-     mkOpt = opt: "  ${hyphenate opt.name} : ${opt.desc}";
-   in concatStringsSep "\n" (map mkOpt opts);
+    opts = if cmd.opts == {} then "" else " [opts]";
+    args = mkArgsString cmd.args;
+    commands = mkCommandsString cmd.commands;
+  in
+    ''usage: ${name}${opts}${args}${commands}
 
-  commandAttrAbout = name: {desc?"", ...}:
-  "  ${name} : ${desc}";
-  commandAbout = name: arg:
-    if isAttrs arg then
-      commandAttrAbout name arg
-    else "  ${name} :";
-  help.usage = name : { commands?{}, args?[], opts?{}, ... }:
-    ''usage: ${name} [opts] ${mkArgsString args}${mkCommandsString commands}
     '';
-
   mkArgsString = args:
     let
-      bkt = arg: ''<${arg.name}> '';
-    in if isNull args then " "
+      bkt = arg: " <${arg.name}>";
+    in if isNull args then ""
        else concatStrings (map bkt args);
   mkCommandsString = commands: if commands == {} then ""
-    else ''{${concatStringsSep "|" (attrNames commands)}}'';
+    else " {${concatStringsSep "|" (attrNames commands)}}";
 
+  help.opts = opts: if opts == [] then "" else
+    let mkOpt = opt: "  ${hyphenate opt.name} : ${opt.desc}"; in ''
+      opts:
+      ${concatStringsSep "\n" (map mkOpt opts)}
 
+      '';
+
+  help.commands = cmd:
+    let
+      commandAttrAbout = name: {desc?"", ...}:
+      "  ${name} : ${desc}";
+      commandAbout = name: arg:
+        if isAttrs arg then
+          commandAttrAbout name arg
+        else "  ${name} :";
+    in if cmd.commands == {} then "" else ''
+    commands:
+    ${concatStringsSep "\n" (mapAttrsToList commandAbout cmd.commands)}
+
+    '';
+  help.foot = name: "";
 
 
 /* #####################################################
@@ -314,8 +321,6 @@ mkComplete
   compreply.compgen-opts = opts: arg:
     ''COMPREPLY+=( $(compgen ${opts} ${arg}) )'';
 
-  safeexit = ''{ return &> /dev/null || exit ; }'';
-
 /* #####################################################
        _   _ _
  _   _| |_(_) |
@@ -328,8 +333,27 @@ util
 
   nArgs = args: if isNull args then 0 else length args;
   hyphenate = name: if stringLength name > 1 then "--${name}" else "-${name}";
+  safeexit = ''{ return &> /dev/null || exit ; }'';
 
-  makeHelpOptions = name: attrs:
+
+
+  # Sanatize inputs for the mkCommand et. al. functions.
+  ingress.command = name: cmd_ :
+    let
+      defaults = {
+        opts?{}, args?null, hook?":",commands?{}, desc?"", preOptHook?""
+        } :
+        let opts_ = (ingress.addHelpOptions name out) // opts;
+        in {
+          inherit hook commands desc preOptHook;
+          opts = ingress.opts opts_;
+          args = ingress.args args;
+        };
+      out = if isString cmd_ then defaults { hook = cmd_; }
+             else defaults cmd_;
+    in out;
+
+  ingress.addHelpOptions = name: attrs:
     let
       opt = {
         desc = "Show this help text.";
@@ -339,23 +363,6 @@ util
         help = opt;
         h = opt;
       };
-    in out;
-
-
-  # Sanatize inputs for the mkCommand et. al. functions.
-  ingress.command = name: cmd_ :
-    let
-      defaults = {
-        opts?{}, args?null, hook?":",commands?{}, desc?"", preOptHook?""
-        } :
-        let opts_ = (makeHelpOptions name out) // opts;
-        in {
-          inherit hook commands desc preOptHook;
-          opts = ingress.opts opts_;
-          args = ingress.args args;
-        };
-      out = if isString cmd_ then defaults { hook = cmd_; }
-             else defaults cmd_;
     in out;
 
   ingress.opts = mapAttrsToList ingress.opt;
@@ -372,9 +379,9 @@ util
           }; in out;
         doHook = hook: { inherit hook; };
         doSet = argument: var: if isFunction var then
-            ''declare ${var {}}="$1"''
+            ''declare ${var {}}="$2"''
           else if argument && isString var then
-            ''declare ${var}="$1"''
+            ''declare ${var}="$2"''
           else if isString var then
             ''declare ${var}=true''
           else "";

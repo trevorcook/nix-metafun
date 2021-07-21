@@ -13,7 +13,8 @@ A metafun specification is either nix text containing lines of Bash or an attrib
 - desc: Description of the command, used in help.
 - opts: Command options, long and short.
 - args: Non optional arguments.
-- hook: Command body; a further metafun specification.
+- hook: Command body.
+- commands: Further subcommand metafun specifications.
 
 The metafun library exports two main nix functions:
 

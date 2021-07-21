@@ -4,15 +4,20 @@ mkEnvironment rec {
   definition = ./metafun-env.nix;
 
   passthru = rec {
-     inherit lib;
-     metafun = callPackage ./metafun.nix {debug=false;};
-     metafun-ref =
-       metafun.mkCommand "metafun-ref" metafun-ref-def ;
-     metafun-ref-completion =
-       metafun.mkCommandCompletion "_metafun-ref-completion" metafun-ref-def ;
-     metafun-ref-def = import ./metafun-ref.nix;
-   };
-  argsOnly_values = "option_a option_b";
+    inherit lib;
+    metafun = callPackage ./metafun.nix {};
+    # The function nix definition
+    metafun-ref-def = import ./metafun-ref.nix { inherit lib; };
+    # The text of the shell script
+    metafun-ref =
+      metafun.mkCommand "metafun-ref" metafun-ref-def ;
+    # The text of the completion script
+    metafun-ref-completion =
+      metafun.mkCommandCompletion "_metafun-ref-completion" metafun-ref-def ;
+  };
+  #This enviornment variable is used in metafun-ref.argsOnly.
+  argsOnly_values = "option-x option-y";
+  # Define the function and completion on shell entry
   shellHook = ''
     metafun-ref(){
       ${passthru.metafun-ref}
@@ -22,12 +27,10 @@ mkEnvironment rec {
     }
     complete -F _metafun-ref-completion metafun-ref
     '';
-  paths = [figlet];
-  envlib = with metafun; {
-    #myfun = myfun-def; #envth now uses metafun for envlib
-    /* myfun = mkCommand "myfun" myfun-def;
-    _myfun-completion = mkCommandCompletion "_myfun-completion" myfun-def; */
 
+  paths = [figlet];
+  envlib = {
+    # A "banner" shell function
     banner = ''
       echo "/* #####################################################"
       echo "$@" | figlet
