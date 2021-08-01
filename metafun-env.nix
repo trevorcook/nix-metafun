@@ -7,29 +7,34 @@ mkEnvironment rec {
     inherit lib;
     metafun = callPackage ./metafun.nix {};
     # The function nix definition
-    metafun-ref-def = import ./metafun-ref.nix { inherit lib; };
+    metafun-ex-def = import ./metafun-example.nix { inherit lib metafun; };
     # The text of the shell script
-    metafun-ref =
-      metafun.mkCommand "metafun-ref" metafun-ref-def ;
+    metafun-example =
+      metafun.mkCommand "metafun-example" metafun-ex-def ;
     # The text of the completion script
-    metafun-ref-completion =
-      metafun.mkCommandCompletion "_metafun-ref-completion" metafun-ref-def ;
+    metafun-example-completion =
+      metafun.mkCommandCompletion "_metafun-example-completion" metafun-ex-def ;
   };
   #This enviornment variable is used in metafun-ref.argsOnly.
   argsOnly_values = "option-x option-y";
   # Define the function and completion on shell entry
   shellHook = ''
-    metafun-ref(){
-      ${passthru.metafun-ref}
+    metafun-example(){
+      ${passthru.metafun-example}
     }
-    _metafun-ref-completion(){
-      ${passthru.metafun-ref-completion}
+    _metafun-example-completion(){
+      ${passthru.metafun-example-completion}
     }
-    complete -F _metafun-ref-completion metafun-ref
+    complete -F _metafun-example-completion metafun-example
     '';
 
   paths = [figlet];
   envlib = {
+    print-reference = ''
+      metafun-example reference command
+      metafun-example reference opt
+      metafun-example reference arg
+      '';
     # A "banner" shell function
     banner = ''
       echo "/* #####################################################"
