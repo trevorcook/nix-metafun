@@ -416,6 +416,9 @@ ingress: sanatize inputs.
               desc = "one of: ${concatStringsSep ", " arg_}.";
               choice = arg_;
             }
+          else if isBook arg_ && arg_ then
+            go { name = "arg";
+                 type = "arg"; }
           else if isAttrs arg_ then
             go arg_
           else null;
