@@ -53,7 +53,7 @@ mkCommand
     let
       setvars = concatMap (s: if s.set == null then [] else [s.set]) opts;
       preOptHook = if setvars == [] then "" else
-        ''unset ${concatStringsSep " " setvars}'';
+        ''declare ${concatStringsSep " " setvars}'';
       mkOptCase = opt: ''
           ${hyphenate opt.name})
             shift
