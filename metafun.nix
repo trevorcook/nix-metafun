@@ -59,6 +59,7 @@ mkCommand
             shift
             ${opt.hook}
             ${if isNull opt.arg then "" else "shift"}
+            ${if opt.exit then safeexit else "" }
           ;;
           '';
       mkGetOpt = opts_ :
@@ -373,8 +374,9 @@ ingress: sanatize inputs.
   ingress.opts = mapAttrsToList ingress.opt;
   ingress.opt = name:
       let
-        go = { desc?"", arg?null, hook?":",set?null }: let out = {
-          inherit desc set name;
+        go = { desc?"", arg?null, hook?":",set?null, exit?false }:
+          let out = {
+          inherit desc set name exit;
           arg = if isFunction hook && isNull arg then
                   ingress.arg "arg"
                 else ingress.arg arg;
