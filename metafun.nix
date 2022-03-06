@@ -23,7 +23,7 @@ mkCommand
         ${command.command cmdpath cmd}
         ;;
         '';
-    in ''
+    in if cmd.verbatim then cmd_ else ''
     ${cmd.preOptHook}
     ${command.option name cmd.opts}
     if ${command.argument-test cmd.args}
@@ -346,15 +346,15 @@ ingress: sanatize inputs.
   ingress.command = name: cmd_ :
     let
       defaults = {
-        opts?{}, args?null, hook?":",commands?{}, desc?"", preOptHook?""
-        } :
+        opts?{}, args?null, hook?":",commands?{}, desc?"",
+        preOptHook?"", verbatim?false} :
         let opts_ = (ingress.addHelpOptions name out) // opts;
         in {
-          inherit hook commands desc preOptHook;
+          inherit hook commands desc preOptHook verbatim;
           opts = ingress.opts opts_;
           args = ingress.args args;
         };
-      out = if isString cmd_ then defaults { hook = cmd_; }
+      out = if isString cmd_ then defaults { hook = cmd_; verbatim=true; }
              else defaults cmd_;
     in out;
 
