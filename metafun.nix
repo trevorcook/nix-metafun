@@ -1,4 +1,4 @@
-{lib}: with builtins; with lib;
+{lib,getopt}: with builtins; with lib;
 let
 
 /* #####################################################
@@ -63,7 +63,8 @@ mkCommand
           ;;
           '';
       mkGetOpt = opts_ :
-        let opts = { long = []; short = [];} //
+        let getopt-exe = getopt + "/bin/getopt";
+            opts = { long = []; short = [];} //
                     groupBy (getAttr "length") opts_;
             # The '+' below stops parsing at first non-option
             shortopt = ''-o +${if shorts=="" then "''" else shorts }'';
@@ -71,7 +72,7 @@ mkCommand
             longopt = optionalString (opts.long != []) ''--long ${longs}'';
             longs = concatStringsSep "," (map mkOpt opts.long);
             mkOpt = opt: opt.name + optionalString (opt.arg != null) ":";
-        in ''getopt  ${shortopt} ${longopt} -- "$@"'';
+        in ''${getopt-exe}  ${shortopt} ${longopt} -- "$@"'';
 
     in if opts == [] then "" else ''
   eval set -- "$(${mkGetOpt opts})"
