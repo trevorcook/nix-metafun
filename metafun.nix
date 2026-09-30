@@ -1,5 +1,62 @@
-{lib,getopt}: with builtins; with lib;
+# This file :: {opts} -> metafun
+# metafun :: command-name -> command-spec -> symlinkJoin-derivation
+
+{lib,getopt,writeTextFile,symlinkJoin}: with builtins; with lib;
+command-name: command-spec:
 let
+  out.metafun = symlinkJoin {
+      name = "metafun-${command-name}";
+      paths = [
+        out.command
+        out.completion
+      ];
+  };
+  out.command = writeTextFile {
+    name = command-name;
+    destination = "/bin/${command-name}";
+    text = command.command command-name command-spec;
+    executable = true;
+  };
+  out.help = writeTextFile {
+    name = "${command-name}__help__";
+    text = help.command command-name command-spec;
+    executable = true;
+  };
+  out.completion = writeTextFile {
+    name = "${command-name}";
+    destination = "/share/bash-completion/completions/${command-name}";
+    text = completion.command command-name command-spec;
+    executable = true;
+  };
+
+  # mkMetafun = name: cmd: 
+  #   let help = mkHelpFile name cmd;
+  #   in symlinkJoin {
+  #     name = "metafun-${name}";
+  #     paths = [
+  #       (mkCommandFile name cmd help)
+  #       # help
+  #       (mkCompletionFile name cmd)
+  #     ];
+  # };
+  # mkCommandFile = name: cmd: help-cmd: writeTextFile {
+  #   inherit name;
+  #   destination = "/bin/${name}";
+  #   text = mkCommand name cmd help-cmd;
+  #   executable = true;
+  # };
+  # mkHelpFile = name: cmd: writeTextFile {
+  #   name = "${name}__help__";
+  #   # destination = "/${name}__help__";
+  #   text = mkHelp name cmd;
+  #   executable = true;
+  # };
+  # mkCompletionFile = name: cmd: writeTextFile {
+  #   name = "${name}";
+  #   destination = "/share/bash-completion/completions/${name}";
+  #   text = mkCommandCompletion name cmd;
+  #   executable = true;
+  # };
 
 /* #####################################################
            _     ____                                          _
@@ -10,78 +67,83 @@ let
 
 mkCommand
 */ #####################################################
-  mkCommand = command.command;
+  command.command = name: cmd:  ''
+    declare GETOPT="${getopt}/bin/getopt";
+    declare HELP_CMD="${out.help}"
+    ${command.subcommand [name] cmd}'';
 
-  command.command = name: cmd_:
+  # command.subcommand path cmd  generate the (sub)comand represented by "path", given the 
+  #   input attributeset, cmd, and associated helpfile.
+  command.subcommand = path: cmd_: 
     let
-      cmd = ingress.command name cmd_ ;
-      mkCommandCase = super: cmd_name: cmd:
+      cmd = ingress.command path cmd_ ;
+      mkCommandCase = cmd_name: cmd:
         let cmdpath = super + " ... " + cmd_name; in
         ''
         ${cmd_name} )
-        shift
-        ${command.command cmdpath cmd}
+        ${command.subcommand (path++[cmd_name]) cmd}
         ;;
         '';
     in if cmd.verbatim then cmd_ else ''
     ${cmd.preOptHook}
-    ${command.option name cmd.opts}
+    # Begin option parsing for ${concatStringsSep " " path}
+    ${command.options cmd.opts}
+    # Done option Parsing
     if ${command.argument-test cmd.args}
       then
       ${cmd.hook}
       ${if cmd.commands == {} then ''
         '' else ''
         shift ${toString (nArgs cmd.args)}
-        case "$1" in
-          ${concatStrings (mapAttrsToList (mkCommandCase name) cmd.commands)}
+        declare parsed_command="$1"; shift
+        case "$parsed_command" in
+          ${concatStrings (mapAttrsToList mkCommandCase cmd.commands)}
           * )
-          echo "Command unrecognized."
-          echo "${help.usage name cmd}"
-          echo "See: ${name} --help"
+          echo "Command unrecognized: ${concatStringsSep " " path}"
+          echo "Ensure full subcommand is specified when appropriate."
+          echo "See: ${concatStrings (take 1 path)} --help"
           ;;
         esac
         ''}
     else
       echo "Argument parse fail."
-      echo "${help.usage name cmd}"
-      echo "See: ${name} --help."
+      echo "See: ${concatStringsSep " " path} --help."
     fi
     '';
 
 
-  command.option = name: opts:
+  command.options = opts:
     let
-      setvars = concatMap (s: if s.set == null then [] else [s.set]) opts;
+      setvars = concatMap (s: if s.set == null then [] else [s.set]) ( attrValues opts );
       preOptHook = if setvars == [] then "" else
         ''declare ${concatStringsSep " " setvars}'';
-      mkOptCase = opt: ''
+      mkOptCase = _: opt: ''
           ${hyphenate opt.name})
-            shift
-            ${opt.hook}
-            ${if isNull opt.arg then "" else "shift"}
-            ${if opt.exit then safeexit else "" }
-          ;;
-          '';
+            ${concatNonEmptySep "\n" [ opt.hook
+                                      (if isNull opt.arg then "" else "shift")
+                                      (if opt.exit then safeexit else "")
+                                      ]}
+            ;;'';
       mkGetOpt = opts_ :
-        let getopt-exe = getopt + "/bin/getopt";
+        let #getopt-exe = getopt + "/bin/getopt";
             opts = { long = []; short = [];} //
-                    groupBy (getAttr "length") opts_;
+                    groupBy (getAttr "length") ( attrValues opts_ );
             # The '+' below stops parsing at first non-option
             shortopt = ''-o +${if shorts=="" then "''" else shorts }'';
             shorts = concatStrings (map mkOpt opts.short);
             longopt = optionalString (opts.long != []) ''--long ${longs}'';
             longs = concatStringsSep "," (map mkOpt opts.long);
             mkOpt = opt: opt.name + optionalString (opt.arg != null) ":";
-        in ''${getopt-exe}  ${shortopt} ${longopt} -- "$@"'';
+        in ''$GETOPT  ${shortopt} ${longopt} -- "$@"'';
 
     in if opts == [] then "" else ''
   eval set -- "$(${mkGetOpt opts})"
   ${preOptHook}
   while true; do
-    case "$1" in
-    ${concatStrings (map mkOptCase opts)}
+    declare parsed_option=$1; shift
+    case "$parsed_option" in
+    ${concatStringsSep "\n" (mapAttrsToList mkOptCase opts)}
     --)
-        shift
         break
         ;;
     esac
@@ -119,44 +181,94 @@ mkCommand
 mkHelp: The help part of the command.
 */ #####################################################
 
-  help.help = name: cmd: ''
-    cat <<'EOF'
-    ${concatStrings [
-      (help.head name cmd)
-      (help.usage name cmd)
-      (help.opts cmd.opts)
-      (help.commands cmd)
-      (help.foot name)
-      ]}
-    EOF
-    ${safeexit}
-    '';
-  help.head = name: cmd: name + ": " + cmd.desc + "\n\n";
-  help.usage = name : cmd:
-   let
-    opts = if cmd.opts == {} then "" else " [opts]";
-    args = mkArgsString cmd.args;
-    commands = mkCommandsString cmd.commands;
-  in
-    ''usage: ${name}${opts}${args}${commands}
-
-    '';
-  mkArgsString = args:
+  # Format the whole help file for the command.
+  help.command = name: cmd_:
     let
-      bkt = arg: " <${arg.name}>";
-    in if isNull args then ""
-       else concatStrings (map bkt args);
-  mkCommandsString = commands: if commands == {} then ""
-    else " {${concatStringsSep "|" (attrNames commands)}}";
+      cmd = ingress.command [name] cmd_ ;
+      mkCommandCase = path: ''
+        "${concatStringsSep "," path}")
+        shift
+        # ''${help.help (mkSubName path) (getSubCmd (mkSubName path) path) }
+        ${help.help ([name]++path) (getSubCmd path) }
+        ;;
+        ''
+          ;
+      getSubCmd =  path: ingress.command ([name]++path) (attrByPath (mkSubCmdPath path) {} cmd) ;
+      mkSubCmdPath = path: if path == [] then []
+        else ["commands"] ++ (intersperse "command" path);
+      # reduce the command specification, cmd, to just a tree of subcommands.
+      reduceToCommands = cmd_or_hook: let
+        exchange-emptys = mapAttrs (_: v: if v == {} then null else v );
+        f = acc: n: v: 
+          if n == "commands" then
+          exchange-emptys  (mapAttrs (n2: v2: reduceToCommands v2) v) 
+          else
+            acc;
+        in if isAttrs cmd_or_hook then
+          foldlAttrs f {} cmd_or_hook
+          else null;
+      # List all the paths to all subcommands
+      all-paths = set: (concatMap subsequence (leaf-paths set));
+      # List all the leafs of a nested attribute set
+      leaf-paths = set: (collect isList (mapAttrsRecursive (p: _: p) set));
+      # get all subsequences of a path: [a b c] -> [[a] [a b] [a b c]]
+      subsequence = ls: 
+        let 
+            subs =  subsequence (drop 1 ls);
+            prepend = ms: [(elemAt ls 0)] ++ ms;
+        in if ls == [] then [] else map prepend ([[]] ++ subs);
+      # subsequence = let f = l: ls: [[l]] ++ (if ls == [] then [] else map (ms: [l]++ms) (f (elemAt ls 0) (drop 1 ls))); in f
 
-  help.opts = opts: if opts == [] then "" else
-    let mkOpt = opt: "  ${hyphenate opt.name} : ${opt.desc}"; in ''
-      opts:
-      ${concatStringsSep "\n" (map mkOpt opts)}
-
+    in ''
+      declare csp=$(IFS=,; echo "$*")
+      case "$csp" in
+        ${mkCommandCase []}
+        ${concatStrings (map mkCommandCase (all-paths (reduceToCommands cmd)))}
+        * )
+        echo "Command unrecognized."
+        echo "See: ${name} --help"
+        ;;
+      esac
       '';
+  
+  # Format the help output for a command (subcommand)
+  help.help = path: cmd:
+    let 
+      mkSection = text: if text == "" then "" else text + "\n";
+    in ''
+      cat <<'EOF'
+      ${concatStrings (map mkSection [(help.head path cmd)
+                                      (help.usage path cmd)
+                                      (help.opts cmd.opts)
+                                      (help.subcommands cmd)
+                                      (help.foot path) ])}EOF
+      ${safeexit}
+      '';
+  help.head = path: cmd: (concatStringsSep " " path) + ": " + cmd.desc + "\n";
+  help.usage = path : cmd:
+   let
+    cmdStr = concatStringsSep " ... " path;
+    optStr = if cmd.opts == {} then "" else " [opts]";
+    argStr = 
+      let
+        bkt = arg: " <${arg.name}>";
+      in if isNull cmd.args then ""
+        else concatStrings (map bkt cmd.args);
+    commandStr = if cmd.commands == {} then ""
+      else " {${concatStringsSep "|" (attrNames cmd.commands)}}";
 
-  help.commands = cmd:
+  in
+    ''usage: ${cmdStr}${optStr}${argStr}${commandStr}
+    '';
+
+  # Format the options section
+  help.opts = opts: if opts == {} then "" else
+    let mkOpt = name: opt: "  ${hyphenate opt.name} : ${opt.desc}"; in ''
+      opts:
+      ${concatStringsSep "\n" (mapAttrsToList mkOpt opts)}
+      '';
+  # Format the subcommand section
+  help.subcommands = cmd:
     let
       commandAttrAbout = name: {desc?"", ...}:
       "  ${name} : ${desc}";
@@ -166,10 +278,12 @@ mkHelp: The help part of the command.
         else "  ${name} :";
     in if cmd.commands == {} then "" else ''
     commands:
-    ${concatStringsSep "\n" (mapAttrsToList commandAbout cmd.commands)}
-
+    ${""}  ${concatStringsSep "\n  " (mapAttrsToList commandAbout cmd.commands)}
     '';
   help.foot = name: "";
+  help.call-help = path: ''
+    ''${HELP_CMD} ${concatStringsSep " " (drop 1 path)}
+    ${safeexit}'';
 
 
 /* #####################################################
@@ -181,34 +295,54 @@ mkHelp: The help part of the command.
                                     |_|
 mkComplete: make the command completion function
 */ #####################################################
-  mkCommandCompletion = completion.command-COMP_WORDS;
-
-  # Replace input arguments with COMP_WORDS vector and call the handler.
-  completion.command-COMP_WORDS  = name: cmd: ''
-    for i in $( seq $(( COMP_CWORD + 1 )) ''${#COMP_WORDS[@]} ); do
-      unset COMP_WORDS[$i]
-    done
-    unset COMP_WORDS[0]
-    set -- "''${COMP_WORDS[@]}"
-    ${completion.command name cmd}
-    '';
 
   #METAFUN Completion Variable
   st = "METAFUN_COMPLETION";
   stV = "$" + st;
 
-  completion.command = name: cmd_:
-    let cmd = ingress.command name cmd_;
+  completion.command = name: cmd: ''
+  # Replace input arguments with COMP_WORDS vector and call the handler.
+    for i in $( seq $(( COMP_CWORD + 1 )) ''${#COMP_WORDS[@]} ); do
+      unset COMP_WORDS[$i]
+    done
+    unset COMP_WORDS[0]
+    set -- "''${COMP_WORDS[@]}"
+    ${completion.subcommand [name] cmd}
+    '';
+  completion.subcommand = path: cmd_:
+    let 
+      cmd = ingress.command path cmd_;
+      command-case = name: subcommand: ''
+          ${name} )
+            shift
+            ${completion.subcommand [name] subcommand}
+            ;;
+          '';
     in ''
       COMPREPLY=( )
       ${completion.opt cmd.opts}
       ${completion.args cmd.args}
-      ${completion.subcommand cmd.commands}
-      '';
+      #''${completion.subcommand cmd.commands}
+      # completion.subcommand = commands:
+      ######################################################
+      # Complete subcommand
+      if [[ ${stV} == cmd ]]; then
+        if [[ $# == 1 ]]; then
+          ${compreply.choice (attrNames cmd.commands) "-- $1"}
+        else
+          case "$1" in
+          ${concatStrings (mapAttrsToList command-case cmd.commands)}
+          * )
+            ${st}=exit
+          ;;
+          esac
+        fi
+      fi
+    '';
   completion.opt = opts:
     let
       test.isopt = str: ''[[ -n "''${${str}#-}"]]'';
-      opt-args = map (opt: hyphenate opt.name) opts;
+      opt-args = map (opt: hyphenate opt.name) (attrValues opts);
       opt-case = opt: ''
         ${hyphenate opt.name})
           COMPREPLY=( )
@@ -244,7 +378,7 @@ mkComplete: make the command completion function
             ${st}=args
           elif [[ $nreply == 1 ]]; then #Is option
             case "$1" in
-            ${ concatStrings (map opt-case opts ) }
+            ${ concatStrings (map opt-case (attrValues opts) ) }
             *)
               ${st}=exit
               ;;
@@ -297,33 +431,30 @@ mkComplete: make the command completion function
       else if type == "dir" then compreply.dir "${hint} _" input
       else compreply.compgen-opts ''-W "_ ${hint}"'' input;
 
-
-
-
-    completion.subcommand = commands:
-    let command-case = name: subcommand: ''
-    ${name} )
-      shift
-      ${completion.command name subcommand}
-      ;;
-    '';
-    in ''
-    ######################################################
-    # Complete cubcommand
-    if [[ ${stV} == cmd ]]; then
-      if [[ $# == 1 ]]; then
-        ${compreply.choice (attrNames commands) "-- $1"}
-      else
-        case "$1" in
-        ${concatStrings (mapAttrsToList command-case commands)}
-        * )
-          ${st}=exit
-        ;;
-        esac
-      fi
-    fi
-  '';
-
+    # completion.subcommand = commands:
+    #   let 
+    #     command-case = name: subcommand: ''
+    #       ${name} )
+    #         shift
+    #         ${completion.subcommand [name] subcommand}
+    #         ;;
+    #       '';
+    #   in ''
+    #   ######################################################
+    #   # Complete subcommand
+    #   if [[ ${stV} == cmd ]]; then
+    #     if [[ $# == 1 ]]; then
+    #       ${compreply.choice (attrNames commands) "-- $1"}
+    #     else
+    #       case "$1" in
+    #       ${concatStrings (mapAttrsToList command-case commands)}
+    #       * )
+    #         ${st}=exit
+    #       ;;
+    #       esac
+    #     fi
+    #   fi
+    # '';
 
   compreply.choice = choices:
     compreply.compgen-opts ''-W "${concatStringsSep " " choices}"'';
@@ -345,26 +476,30 @@ mkComplete: make the command completion function
          |___/
 ingress: sanatize inputs.
 */ #####################################################
-  ingress.command = name: cmd_ :
+  # ingress.command path cmd: sanatize command attribute set, cmd, of the (sub)command, path.
+  ingress.command = path: cmd_:
     let
-      defaults = {
-        opts?{}, args?null, hook?":",commands?{}, desc?"",
+      addDefaults = {
+        opts?{}, args?null, hook?"",commands?{}, desc?"",
         preOptHook?"", verbatim?false} :
-        let opts_ = (ingress.addHelpOptions name out) // opts;
+        let opts_ = (ingress.help-options path) // opts;
         in {
           inherit hook commands desc preOptHook verbatim;
           opts = ingress.opts opts_;
           args = ingress.args args;
         };
-      out = if isString cmd_ then defaults { hook = cmd_; verbatim=true; }
-             else defaults cmd_;
+      # out = if isString cmd_ then defaults { hook = cmd_; verbatim=true; }
+      #        else defaults cmd_;
+      out = if isAttrs cmd_ then addDefaults cmd_
+             else addDefaults { hook = cmd_; verbatim=true; };
+            #  else defaults cmd_;
     in out;
 
-  ingress.addHelpOptions = name: attrs:
+  ingress.help-options = path:
     let
       opt = {
         desc = "Show this help text.";
-        hook = help.help name (recursiveUpdate {opts = out;} attrs);
+        hook = help.call-help path ;
       };
       out = {
         help = opt;
@@ -372,23 +507,21 @@ ingress: sanatize inputs.
       };
     in out;
 
-  ingress.opts = mapAttrsToList ingress.opt;
+  ingress.opts = mapAttrs ingress.opt;
   ingress.opt = name:
       let
-        go = { desc?"", arg?null, hook?":",set?null, exit?false }:
+        go = { desc?"", arg?null, hook?"", set?null, exit?false, ... }:
           let out = {
           inherit desc set name exit;
           arg = if isFunction hook && isNull arg then
                   ingress.arg "arg"
                 else ingress.arg arg;
-          hook = ''
-            ${ if isNull set then ""
-               else if isNull out.arg then
-                 ''declare ${set}=true''
-               else ''declare ${set}="$1"''
-            }
-            ${if isFunction hook then hook {} else hook}
-            '';
+          hook = ''${ concatNonEmptySep "\n" [
+                   (if isNull set then ""
+                    else if isNull out.arg then
+                      ''declare ${set}=true''
+                    else ''declare ${set}="$1"'')
+                   (if isFunction hook then hook {} else hook)]}'';
           length = if stringLength name > 1 then "long" else "short";
           }; in out;
       in opt: if isAttrs opt then go opt
@@ -440,8 +573,10 @@ util
   nArgs = args: if isNull args then 0 else length args;
   hyphenate = name: if stringLength name > 1 then "--${name}" else "-${name}";
   safeexit = ''{ return &> /dev/null || exit ; }'';
-
-
   reference-commands = import ./metafun-ref.nix ;
+  # concatenate nonEmpty strings from the given list
+  concatNonEmptySep = sep: xs: concatStringsSep sep (concatMap (s: if s=="" then [] else [s]) xs);
+  pnt = v: seq (debug.traceVal (generators.toPretty {} )v) v;
 
-in { inherit mkCommand mkCommandCompletion reference-commands; }
+# in { inherit mkCommand mkCommandCompletion reference-commands mkCommandFile mkMetafun mkHelpFile; }
+in out.metafun
