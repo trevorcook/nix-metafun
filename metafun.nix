@@ -188,7 +188,6 @@ mkHelp: The help part of the command.
       mkCommandCase = path: ''
         "${concatStringsSep "," path}")
         shift
-        # ''${help.help (mkSubName path) (getSubCmd (mkSubName path) path) }
         ${help.help ([name]++path) (getSubCmd path) }
         ;;
         ''
@@ -240,6 +239,7 @@ mkHelp: The help part of the command.
       ${concatStrings (map mkSection [(help.head path cmd)
                                       (help.usage path cmd)
                                       (help.opts cmd.opts)
+                                      (help.args cmd.args)
                                       (help.subcommands cmd)
                                       (help.foot path) ])}EOF
       ${safeexit}
@@ -266,6 +266,15 @@ mkHelp: The help part of the command.
     let mkOpt = name: opt: "  ${hyphenate opt.name} : ${opt.desc}"; in ''
       opts:
       ${concatStringsSep "\n" (mapAttrsToList mkOpt opts)}
+      '';
+  help.args = args: if args == null then "" else
+    let mkArg = i: arg: if isString arg then
+      "  ${arg} : '" 
+        else
+      "  ${toString i}) ${arg.name} : ${arg.desc}"; 
+    in ''
+      args:
+      ${concatStringsSep "\n" (imap1 mkArg args)}
       '';
   # Format the subcommand section
   help.subcommands = cmd:
@@ -301,7 +310,9 @@ mkComplete: make the command completion function
   stV = "$" + st;
 
   completion.command = name: cmd: ''
-  # Replace input arguments with COMP_WORDS vector and call the handler.
+    # COMP_WORDS holds command line arguments (for bash functions, not commands)
+    # Delete all arguments past the one under the cursor and assign them to positional
+    # parameters
     for i in $( seq $(( COMP_CWORD + 1 )) ''${#COMP_WORDS[@]} ); do
       unset COMP_WORDS[$i]
     done
@@ -431,31 +442,6 @@ mkComplete: make the command completion function
       else if type == "dir" then compreply.dir "${hint} _" input
       else compreply.compgen-opts ''-W "_ ${hint}"'' input;
 
-    # completion.subcommand = commands:
-    #   let 
-    #     command-case = name: subcommand: ''
-    #       ${name} )
-    #         shift
-    #         ${completion.subcommand [name] subcommand}
-    #         ;;
-    #       '';
-    #   in ''
-    #   ######################################################
-    #   # Complete subcommand
-    #   if [[ ${stV} == cmd ]]; then
-    #     if [[ $# == 1 ]]; then
-    #       ${compreply.choice (attrNames commands) "-- $1"}
-    #     else
-    #       case "$1" in
-    #       ${concatStrings (mapAttrsToList command-case commands)}
-    #       * )
-    #         ${st}=exit
-    #       ;;
-    #       esac
-    #     fi
-    #   fi
-    # '';
-
   compreply.choice = choices:
     compreply.compgen-opts ''-W "${concatStringsSep " " choices}"'';
   compreply.hook = hook:
@@ -480,7 +466,7 @@ ingress: sanatize inputs.
   ingress.command = path: cmd_:
     let
       addDefaults = {
-        opts?{}, args?null, hook?"",commands?{}, desc?"",
+        opts?{}, args?null, hook?":",commands?{}, desc?"",
         preOptHook?"", verbatim?false} :
         let opts_ = (ingress.help-options path) // opts;
         in {
