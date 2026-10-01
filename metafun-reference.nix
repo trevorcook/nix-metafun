@@ -10,9 +10,9 @@
         hook = ''
     cat <<'EOF'
     _metafun-reference-completion(){
-      source result/share/bash-completion/completions/metafun-reference "$@"
+      source $(dirname $(which metafun-reference))/../share/bash-completion/completions/metafun-reference "$@"
     }
-    complete -F _metafun-reference-completion result/bin/metafun-reference
+    complete -F _metafun-reference-completion metafun-reference
     EOF
     '';
     };
