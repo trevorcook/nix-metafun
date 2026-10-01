@@ -23,13 +23,13 @@ To get started try out the example function `metafun-reference` by in a flake sh
 - Try the command `metafun-reference --help` to view the available options.
 - Set up command completions with:
 
-> eval $(metafun-reference --setup-completions)
+> eval "$(metafun-reference --setup-completion)"
 
 Reference `metafun-reference.nix` in this directory to see how the function behavior--options, arguments, and commands--are specified through a nix attribute set.
 
 ## Use metafun in your project
 
-Include metafun as an input to a nix flake projects. Use the `metafun` attribute to "compile" nix expressions to bash scripts. Use of metafun is of the form:
+Include `metafun` as an input to a nix flake projects. Use the `metafun` attribute to "compile" nix expressions to bash scripts. Use of metafun is of the form:
 
 ```nix
 
