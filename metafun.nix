@@ -1,7 +1,8 @@
 # This file :: {opts} -> metafun
-# metafun :: command-name -> command-spec -> symlinkJoin-derivation
+{lib,getopt,writeTextFile,symlinkJoin}: 
+with builtins; with lib;
 
-{lib,getopt,writeTextFile,symlinkJoin}: with builtins; with lib;
+# metafun :: command-name -> command-spec -> symlinkJoin-derivation
 command-name: command-spec:
 let
   out.metafun = symlinkJoin {
@@ -25,39 +26,17 @@ let
   out.completion = writeTextFile {
     name = "${command-name}";
     destination = "/share/bash-completion/completions/${command-name}";
+    text = completion.script out.completion-command;
+    executable = true;
+  };
+  out.completion-command = writeTextFile {
+    name = "${command-name}";
+    # destination = "/share/bash-completion/completions/${command-name}";
     text = completion.command command-name command-spec;
     executable = true;
   };
 
-  # mkMetafun = name: cmd: 
-  #   let help = mkHelpFile name cmd;
-  #   in symlinkJoin {
-  #     name = "metafun-${name}";
-  #     paths = [
-  #       (mkCommandFile name cmd help)
-  #       # help
-  #       (mkCompletionFile name cmd)
-  #     ];
-  # };
-  # mkCommandFile = name: cmd: help-cmd: writeTextFile {
-  #   inherit name;
-  #   destination = "/bin/${name}";
-  #   text = mkCommand name cmd help-cmd;
-  #   executable = true;
-  # };
-  # mkHelpFile = name: cmd: writeTextFile {
-  #   name = "${name}__help__";
-  #   # destination = "/${name}__help__";
-  #   text = mkHelp name cmd;
-  #   executable = true;
-  # };
-  # mkCompletionFile = name: cmd: writeTextFile {
-  #   name = "${name}";
-  #   destination = "/share/bash-completion/completions/${name}";
-  #   text = mkCommandCompletion name cmd;
-  #   executable = true;
-  # };
-
+  
 /* #####################################################
            _     ____                                          _
  _ __ ___ | | __/ ___|___  _ __ ___  _ __ ___   __ _ _ __   __| |
@@ -302,13 +281,22 @@ mkHelp: The help part of the command.
 | | | | | |   <| |__| (_) | | | | | | |_) | |  __/ ||  __/
 |_| |_| |_|_|\_\\____\___/|_| |_| |_| .__/|_|\___|\__\___|
                                     |_|
-mkComplete: make the command completion function
+complete: make the command completion function
 */ #####################################################
 
-  #METAFUN Completion Variable
+  # for interpolation convenience sake.
   st = "METAFUN_COMPLETION";
   stV = "$" + st;
 
+  # This is final script that should be sourced to initialize command completion.
+  completion.script = completion-file: let fname = "_${command-name}-completion_"; in ''
+    ${fname}(){
+      source ${completion-file} "$@"
+    }
+    complete -F ${fname} ${command-name}
+    '';
+
+  # The body of a completion script, i.e. the contents of a file.
   completion.command = name: cmd: ''
     # COMP_WORDS holds command line arguments (for bash functions, not commands)
     # Delete all arguments past the one under the cursor and assign them to positional
@@ -320,6 +308,7 @@ mkComplete: make the command completion function
     set -- "''${COMP_WORDS[@]}"
     ${completion.subcommand [name] cmd}
     '';
+  # The main completion body.
   completion.subcommand = path: cmd_:
     let 
       cmd = ingress.command path cmd_;
