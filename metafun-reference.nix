@@ -73,7 +73,7 @@
            { name = "file"; desc = "A file."; type = "file"; }
            { name = "directory"; desc = "A directory."; type = "dir"; }
            { name = "hook"; desc = "Arbitrary code."; completion.hook = "echo $@"; }
-           { name = "compgen-arg"; desc = "Arbitrary compgen argument."; completion.compgen-opts = "-A job"; }
+           { name = "compgen-arg"; desc = "Arbitrary compgen argument. An environment variable in this case."; completion.compgen-opts = "-A variable"; }
           ];
     };
   };
