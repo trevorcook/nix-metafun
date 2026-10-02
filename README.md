@@ -16,12 +16,16 @@ This project contains:
 
 ## Reference Function
 
-To get started try out the example function `metafun-reference` in a flake shell:
+To get started try out the example function `metafun-reference` in a flake development shell:
+
+> nix develop --no-write-lock-file github:trevorcook/nix-metafun#metafun-reference
+
+or 
 
 > nix shell --no-write-lock-file github:trevorcook/nix-metafun#metafun-reference
 
 - Try the command `metafun-reference --help` to view the available options.
-- Although tools like homemanager should correctly initialize tab completions, `nix shell` (apparently) doesn't. The completion setup script location can be viewed with `metafun-reference --completion-path` and sourced with the following.
+- Although `nix develop` and tools like `homemanager` correctly initialize tab completions, `nix shell` doesn't. The completion setup script location can be viewed with `metafun-reference --completion-path` and sourced with the following.
 
 > source "$(metafun-reference --completion-path)"
 
