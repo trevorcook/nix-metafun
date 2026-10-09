@@ -1,5 +1,5 @@
 {
-  description = "nix-metafun is a utility for creating bash scripts based on nix expressions.";
+  description = "nix-metafun is a utility for creating bash scripts based on attribte sets that declare options, arguments, subcommands, and hooks.";
   inputs = {
     nixpkgs.url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.zst";
   };
