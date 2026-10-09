@@ -369,7 +369,7 @@ rec {
               [[ $1 == "=" ]] && shift
               if [[ $# == 1 ]]; then
                 #COMPREPLY+=( _ ${hyphenate opt.name}_arg{$1} )
-                ${completion.arg opt.arg "$1"}
+                ${text.completion.arg opt.arg "$1"}
                 shift
               else
                 shift
