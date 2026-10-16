@@ -73,6 +73,7 @@
            { name = "arbitrary"; desc = "Arbitrary argument."; }
              ];
     };
+    command-string = ''echo Running \"command-string\" subcommand hook with remaining command line parameters: $@'';
   };
 
 }

@@ -3,7 +3,7 @@
 with builtins; with lib;
 # Metafun as a package is a functor, with 
 #    - `metafun name spec` resulting in basic scripts
-#    - `metafun.withPackages name spec packages` resulting in writeShellApplication based scripts
+#    - `metafun.withPackages name packages spec` resulting in writeShellApplication based scripts
 #       with both the check phase and additional bash options disable.
 #    - `metafun.application attrset spec` resulting in writeShellApplication based scripts. See
 #       the trivial builders section of the nixpkgs manual for attribute details.
@@ -29,8 +29,8 @@ rec {
   __functor = _:  file.metafun;
   # metafun.application :: writeShellApplicationAtributes -> command-spec -> symlinkJoin-derivation
   application = file.metafunApplication;
-  # metafun.withPackages :: command-name -> command-spec -> packages -> symlinkJoin-derivation
-  withPackages = name: spec: packages: file.metafunApplication {inherit name; runtimeInputs = packages; checkPhase = ""; bashOptions=[];} spec;
+  # metafun.withPackages :: command-name -> packages -> command-spec -> symlinkJoin-derivation
+  withPackages = name: packages: spec: file.metafunApplication {inherit name; runtimeInputs = packages; checkPhase = ""; bashOptions=[];} spec;
 
   # Utilities that result in /nix/store files.
   file = {
@@ -359,7 +359,6 @@ rec {
         '';
       opt = opts:
         let
-          # test.isopt = str: ''[[ -n "''${${str}#-}"]]'';
           opt-args = map (opt: hyphenate opt.name) (attrValues opts);
           opt-case = opt: ''
             ${hyphenate opt.name})
@@ -369,7 +368,7 @@ rec {
               [[ $1 == "=" ]] && shift
               if [[ $# == 1 ]]; then
                 #COMPREPLY+=( _ ${hyphenate opt.name}_arg{$1} )
-                ${text.completion.arg opt.arg "$1"}
+            ${text.completion.arg opt.arg "$1"}
                 shift
               else
                 shift
@@ -472,7 +471,7 @@ rec {
         let
           addDefaults = {
             opts?{}, args?null, hook?":",commands?{}, desc?"",
-            preOptHook?"", verbatim?false} :
+            preOptHook?"", verbatim?false, ...} :
             let opts_ = (ingress.help-options path) // opts;
             in {
               inherit hook commands desc preOptHook verbatim;
