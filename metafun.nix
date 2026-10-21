@@ -11,6 +11,11 @@ with builtins; with lib;
 
 # Some convenience functions.
 let
+    # shellcheck disable=SC2104,SC2164
+  safe-exit = ''
+    # shellcheck disable=SC2317
+    return 2>/dev/null || exit 0
+    '';
   nArgs = args: if isNull args then 0 else length args;
   hyphenate = name: if stringLength name > 1 then "--${name}" else "-${name}";
   reference-commands = import ./metafun-ref.nix ;
@@ -34,8 +39,9 @@ rec {
 
   # Utilities that result in /nix/store files.
   file = {
-    metafunApplication = attrs: command-spec: symlinkJoin {
+    metafunApplication = {name,passthru?{},...}@attrs: command-spec: symlinkJoin {
       name = "metafun-${attrs.name}";
+      inherit passthru;
       paths = [
         (file.commandApplication attrs command-spec)
         (file.completion attrs.name command-spec)
@@ -54,7 +60,7 @@ rec {
       text = text.command.command command-name command-spec;
       executable = true;
     };
-    commandApplication = {name,runtimeInputs,excludeShellChecks?[],...}@attrs: command-spec: 
+    commandApplication = {name,...}@attrs: command-spec: 
       let overrides = {
             text = text.command.command name command-spec;
             # excludeShellChecks = ["SC2317"] ++ excludeShellChecks; 
@@ -139,7 +145,7 @@ rec {
               ${hyphenate opt.name})
                 ${concatNonEmptySep "\n" [ opt.hook
                                           (if isNull opt.arg then "" else "shift")
-                                          (if opt.exit then "exit" else "")
+                                          (if opt.exit then "${safe-exit}" else "")
                                           ]}
                 ;;'';
           mkGetOpt = opts_ :
@@ -201,7 +207,7 @@ rec {
             cat <<'EOF'
             ${text.help.output ([name]++path) (getSubCmd path) }
             EOF
-            exit
+            ${safe-exit}
             ;;
             ''
               ;
@@ -300,7 +306,7 @@ rec {
       foot = name: "";
       call-help = path: ''
         ''${HELP_CMD} ${concatStringsSep " " (drop 1 path)}
-        exit'';
+        ${safe-exit}'';
     };
 
     # Make the command completion text
@@ -463,6 +469,8 @@ rec {
       };
 
     };
+    # This hook will exit politely whether sourced or in script.
+    inherit safe-exit;
   };
 
   # Utilities that sanatize and normalize the inputs, i.e. the command-spec.

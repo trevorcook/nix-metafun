@@ -122,7 +122,7 @@ Not seen in this output is a dedicated command for the help output. Direct calls
 
 > command [opts_0] <arg_0_1> .. <arg_0_i> subcommand_n [opts_n] <arg_m_1> .. <arg_m_j>
 
-At every (sub)command, any number of that (sub)command's options may be supplied, but each declared argument is required. This restricts the types of commands that it creates. For instance a command that processes one or more files, `process-files <file1> [<files>]`, is not specifically supported. The general workaround for unsupported patterns is to put the required logic in the specification's `hook`s. The workaround for this particular situation could be to declare one file argument and check within the hook for any additional files:
+At every (sub)command, any number of that (sub)command's options may be supplied, but each declared argument is required and if *any* subcommands are specified then one must be invoked. This restricts the types of commands that it creates. For instance a command that processes one or more files, `process-files <file1> [<files>]`, is not specifically supported. The general workaround for unsupported patterns is to put the required logic in the specification's `hook`s. The workaround for this particular situation could be to declare one file argument and check within the hook for any additional files:
 
 ```nix
 {
