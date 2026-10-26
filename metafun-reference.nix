@@ -30,6 +30,7 @@
                 b = { desc = "set var_b to an argument";
                   hook = ''echo option \"b\" set var_b="$var_b"'';
                   set = "var_b";
+                  alias = "bee";
                   arg = true; };
               # a-hook and b-hook mimic the behavior of a and b only using "hooks".
               a-hook = { desc = "set var_a using a hook";

@@ -1,5 +1,5 @@
 # This file :: {opts} -> metafun
-{lib,getopt,writeTextFile,symlinkJoin,writeShellApplication}: 
+{lib,writeTextFile,symlinkJoin,writeShellApplication}: 
 with builtins; with lib;
 # Metafun as a package is a functor, with 
 #    - `metafun name spec` resulting in basic scripts
@@ -14,7 +14,7 @@ let
     # shellcheck disable=SC2104,SC2164
   safe-exit = ''
     # shellcheck disable=SC2317
-    return 2>/dev/null || exit 0
+    return 2>/dev/null || exit
     '';
   nArgs = args: if isNull args then 0 else length args;
   hyphenate = name: if stringLength name > 1 then "--${name}" else "-${name}";
@@ -25,8 +25,24 @@ let
   # for interpolation convenience sake.
   st = "METAFUN_COMPLETION";
   stV = "$" + st;
+  # create expanded options with aliases expanded into inidividual options.
+  expand-opts = opts: 
+    let
+      expand = name: opt: [ {name = opt.name; value = removeAttrs opt ["alias"];} ] ++ 
+                          (if isString opt.alias then 
+                            [{name = opt.alias; 
+                              value = (removeAttrs opt ["alias"]) // {
+                                      name = opt.alias;
+                                      desc = "Same as ${hyphenate opt.name}.";};}]
+                           else []);
+    in
+      listToAttrs (concatLists (mapAttrsToList expand opts));
+  split-opts = opts: 
+    let
+      short-opts = filterAttrs (name: opt: stringLength opt.name == 1) opts;
+      long-opts = filterAttrs (name: opt: stringLength opt.name > 1) opts;
+    in { inherit short-opts long-opts; };
 in
-
 # The metafun __functor attribure.
 rec {
   # Top level utilities.
@@ -85,18 +101,25 @@ rec {
       executable = true;
     };
 
+    getopt = writeTextFile {
+      name = "getopt";
+      text = text.getopt;
+    };
+
   };
 
   # Utilities that result in text strings (which go into the store files).
   text = {
+
     # The command.
     command = {
       # Alias text.command.command as text.command
       __functor = _: text.command.command;
       # Top level command script contents.
       command = name: cmd:  ''
-        declare GETOPT="${getopt}/bin/getopt";
         declare HELP_CMD="${file.help name cmd}"
+        # Load getopt()
+        source ${file.getopt}
         ${text.command.subcommand [name] cmd}'';
       #  subcommand path cmd:  generate the (sub)command represented by "path", given the 
       #   input attribute set, cmd
@@ -110,9 +133,10 @@ rec {
             ;;
             '';
         in if cmd.verbatim then cmd_ else ''
+
         ${cmd.preOptHook}
         # Begin option parsing for ${concatStringsSep " " path}
-        ${text.command.options cmd.opts}
+        ${text.command.options path cmd.opts}
         # Done option Parsing
         if ${text.command.argument-test cmd.args}
           then
@@ -136,40 +160,50 @@ rec {
         fi
         '';
       # Option parsing section of the (sub command) based on specified opts.
-      options = opts:
+      options = path: opts:
         let
           setvars = concatMap (s: if s.set == null then [] else [s.set]) ( attrValues opts );
           preOptHook = if setvars == [] then "" else
             ''declare ${concatStringsSep " " setvars}'';
+          option-match = opt: (hyphenate opt.name)+ (if isString opt.alias then
+                                                          "|"+(hyphenate opt.alias) else "");
           mkOptCase = _: opt: ''
-              ${hyphenate opt.name})
+              ${option-match opt})
                 ${concatNonEmptySep "\n" [ opt.hook
                                           (if isNull opt.arg then "" else "shift")
-                                          (if opt.exit then "${safe-exit}" else "")
+                                          (if opt.exit then "${safe-exit} 0" else "")
                                           ]}
                 ;;'';
-          mkGetOpt = opts_ :
-            let 
-                opts = { long = []; short = [];} //
-                        groupBy (getAttr "length") ( attrValues opts_ );
-                # The '+' below stops parsing at first non-option
-                shortopt = ''-o +${if shorts=="" then "''" else shorts }'';
-                shorts = concatStrings (map mkOpt opts.short);
-                longopt = optionalString (opts.long != []) ''--long ${longs}'';
-                longs = concatStringsSep "," (map mkOpt opts.long);
-                mkOpt = opt: opt.name + optionalString (opt.arg != null) ":";
-            in ''$GETOPT  ${shortopt} ${longopt} -- "$@"'';
-
         in if opts == [] then "" else ''
-          eval set -- "$(${mkGetOpt opts})"
+
           ${preOptHook}
+          
+          declare current_option
+          declare -a updated_params
           while true; do
-            declare parsed_option=$1; shift
-            case "$parsed_option" in
+            current_option=""
+            updated_params=()
+
+            # Parse next option
+            getopt current_option updated_params "$@"
+            set -- "''${updated_params[@]}"
+            if [[ -z "$current_option" ]]; then
+              break
+            fi
+
+            case "$current_option" in
             ${concatStringsSep "\n" (mapAttrsToList mkOptCase opts)}
             --)
                 break
                 ;;
+            -*)
+              echo "${concatStringsSep " ... " path} Unknown option: $current_option"
+              ${safe-exit} 1
+              ;;
+            *)
+              echo Impossible state in parsing option: $current_option
+              break
+              ;;
             esac
           done
           '';
@@ -194,6 +228,73 @@ rec {
           }
         '';
     };
+    getopt = ''
+        # This file is made to be sourced by metafun generated scripts.
+
+        # It accepts 2 variable names for its first two options
+        # and a varaiable number of additional options. It will parse the 
+        # first non-named variable ($3) for standard option formatting
+        # and update the first named variable with the option and the
+        # second variable with the array of remaining options.
+
+        # Usage:
+
+        # source <this_script> 
+        # declare opt; declare -a vargs
+        # getopt opt vargs "$@" #Pass pparams
+        # set -- "''${vargs[@]}" #update pparams
+        # if [[ -z "$opt" ]]; then
+        #   echo "no option found, pparams unmodified
+        # else
+        #   echo "option found, pparams modified.
+        # fi
+
+        # A found option can be: a short option (-a), the first short 
+        # option in a cluster of options (-abc), a long option 
+        # (--a-long-opt), or a long option with argument 
+        # (--another-opt=myArg). The "returned" array is the remaining
+        # unparsed options, possibly prepended with the remaing
+        # short options or argument. 
+        
+        getopt(){
+        # The parsed option and return parameters.
+        declare -n getopt_retopt="$1"
+        declare -n getopt_retparams="$2"
+        shift 2
+        # The remaining parameters, the first will be analyzed.
+        declare token="$1"
+        # Local variables for an argument, and leftover short options.
+        declare arg moreopt
+
+        # Parse the option ##########################
+
+        if [[ "$token" == "--" ]]; then                     # Special case "--"
+            getopt_retopt="--"
+            getopt_retparams=("''${@:2}")
+        elif [[ "$token" == --* ]]; then                    # Long option
+          if [[ "$token" == *=* ]]; then                      # With =argument
+              getopt_retopt="''${token%%=*}"
+              arg="''${token#*=}"
+              getopt_retparams=("$arg" "''${@:2}")
+          else                                                # Without argument
+            getopt_retopt="$token"
+            getopt_retparams=("''${@:2}")
+        fi
+        elif [[ "$token" == -* && "$token" != "-" ]]; then  # Short option
+          if [[ ''${#token} -eq 2 ]]; then                    # Alone
+              getopt_retopt="$token"
+              getopt_retparams=("''${@:2}")
+          elif [[ ''${#token} -gt 2 ]]; then                  # In a cluster
+              getopt_retopt="''${token:0:2}"
+              moreopt="-''${token:2}"
+              getopt_retparams=("$moreopt" "''${@:2}")
+          fi
+        else                                                # No option
+          getopt_retopt=
+          getopt_retparams=("$@")
+        fi
+        }'';
+
     # Make the text for the help file that the command uses.
     help = {
       # lias text.help.command as text.help
@@ -253,8 +354,8 @@ rec {
         let 
           mkSection = text: if text == "" then "" else text + "\n";
         in ''
-          ${concatStrings (map mkSection [(text.help.head path cmd)
-                                          (text.help.usage path cmd)
+          ${concatStrings (map mkSection [(text.help.usage path cmd)
+                                          (text.help.head path cmd)
                                           (text.help.opts cmd.opts)
                                           (text.help.args cmd.args)
                                           (text.help.subcommands cmd)
@@ -278,10 +379,16 @@ rec {
 
       # Format the options section
       opts = opts: if opts == {} then "" else
-        let mkOpt = name: opt: "  ${hyphenate opt.name} : ${opt.desc}"; in ''
+        let 
+          mkOpt = opt: "  ${hyphenate opt.name} : ${opt.desc}"; 
+          full-opts = split-opts (expand-opts opts);
+          list-opts = mapAttrsToList (n: opt: opt);
+          full-opt-list = (list-opts full-opts.short-opts)++(list-opts full-opts.long-opts);
+          in ''
           opts:
-          ${concatStringsSep "\n" (mapAttrsToList mkOpt opts)}
+          ${concatStringsSep "\n" (map mkOpt full-opt-list)}
           '';
+          # ${concatStringsSep "\n" (mapAttrsToList mkOpt long-opts)}
       args = args: if args == null then "" else
         let mkArg = i: arg: if isString arg then
           "  ${arg} : '" 
@@ -365,7 +472,8 @@ rec {
         '';
       opt = opts:
         let
-          opt-args = map (opt: hyphenate opt.name) (attrValues opts);
+          expanded-opts = expand-opts opts;
+          opt-args = map (opt: hyphenate opt.name) (attrValues expanded-opts);
           opt-case = opt: ''
             ${hyphenate opt.name})
               COMPREPLY=( )
@@ -401,7 +509,7 @@ rec {
                 ${st}=args
               elif [[ $nreply == 1 ]]; then #Is option
                 case "$1" in
-                ${ concatStrings (map opt-case (attrValues opts) ) }
+                ${ concatStrings (map opt-case (attrValues expanded-opts) ) }
                 *)
                   ${st}=exit
                   ;;
@@ -491,23 +599,28 @@ rec {
         in out;
 
       help-options = path:
-        let
-          opt = {
-            desc = "Show this help text.";
-            hook = text.help.call-help path ;
-          };
-          out = {
-            help = opt;
-            h = opt;
-          };
-        in out;
+        # let
+        #   opt = {
+        #     desc = "Show this help text.";
+        #     hook = text.help.call-help path;
+        #     alias = "help";
+        #   };
+        #   out = {
+        #     help = opt;
+        #     h = opt;
+        #   };
+        # in out;
+        { h = {
+          desc = "Show this help text.";
+          hook = text.help.call-help path;
+          alias = "help"; };};
 
       opts = mapAttrs ingress.opt;
       opt = name:
           let
-            go = { desc?"", arg?null, hook?"", set?null, exit?false, ... }:
+            go = { desc?"", arg?null, hook?"", set?null, exit?false, alias?null,... }:
               let out = {
-              inherit desc set name exit;
+              inherit desc set name exit alias;
               arg = if isFunction hook && isNull arg then
                       ingress.arg "arg"
                     else ingress.arg arg;

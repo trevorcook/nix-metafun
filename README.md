@@ -42,6 +42,7 @@ Generally, each option specification is an attribute set with the following attr
   - `arg`: An argument specification for when the option requires an argument.
   - `set`: A string naming a variable to set, either to the supplied argument, or true if no argument.
   - `exit`: A boolean to signal if the script should exit after processing this option.
+  - `alias`: An altranate name for the option (e.g. long option version of a short option).
   
 The argument specification is, again generally, a set with the attributes:
   
