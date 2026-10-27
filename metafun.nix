@@ -169,7 +169,7 @@ rec {
                                                           "|"+(hyphenate opt.alias) else "");
           mkOptCase = _: opt: ''
               ${option-match opt})
-                ${concatNonEmptySep "\n" [(''[[ -n $was_cluster ]] && set -- "${1#-}" "${@:2}"'')  
+                ${concatNonEmptySep "\n" [(''[[ -n $option_in_cluster ]] && set -- "''${1#-}" "''${@:2}"'')  
                                            opt.hook
                                           (if isNull opt.arg then "" else "shift")
                                           (if opt.exit then "${safe-exit} 0" else "")
@@ -179,12 +179,12 @@ rec {
 
           ${preOptHook}
           
-          declare current_option was_cluster
+          declare current_option option_in_cluster
           declare -a updated_params
           while true; do
 
             # Parse next option
-            getopt current_option was_cluster updated_params "$@"
+            getopt current_option option_in_cluster updated_params "$@"
             set -- "''${updated_params[@]}"
             if [[ -z "$current_option" ]]; then
               break
@@ -301,6 +301,7 @@ rec {
         else                                                # No option
           getopt_retparams=("$@")
         fi
+        # echo leaving getopt $getopt_retopt $getopt_cluster 
         }'';
 
     # Make the text for the help file that the command uses.
