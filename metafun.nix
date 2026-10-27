@@ -169,7 +169,8 @@ rec {
                                                           "|"+(hyphenate opt.alias) else "");
           mkOptCase = _: opt: ''
               ${option-match opt})
-                ${concatNonEmptySep "\n" [ opt.hook
+                ${concatNonEmptySep "\n" [(''[[ -n $was_cluster ]] && set -- "${1#-}" "${@:2}"'')  
+                                           opt.hook
                                           (if isNull opt.arg then "" else "shift")
                                           (if opt.exit then "${safe-exit} 0" else "")
                                           ]}
@@ -178,14 +179,12 @@ rec {
 
           ${preOptHook}
           
-          declare current_option
+          declare current_option was_cluster
           declare -a updated_params
           while true; do
-            current_option=""
-            updated_params=()
 
             # Parse next option
-            getopt current_option updated_params "$@"
+            getopt current_option was_cluster updated_params "$@"
             set -- "''${updated_params[@]}"
             if [[ -z "$current_option" ]]; then
               break
@@ -231,22 +230,23 @@ rec {
     getopt = ''
         # This file is made to be sourced by metafun generated scripts.
 
-        # It accepts 2 variable names for its first two options
+        # It accepts variable names for its first three options
         # and a varaiable number of additional options. It will parse the 
-        # first non-named variable ($3) for standard option formatting
-        # and update the first named variable with the option and the
-        # second variable with the array of remaining options.
+        # first non-named variable ($4) for standard option formatting
+        # and update the first named variable with the option, the second
+        # signaling whether the option was part of a cluster (gang) of 
+        # options, and the third variable with the array of remaining options.
 
         # Usage:
 
         # source <this_script> 
-        # declare opt; declare -a vargs
-        # getopt opt vargs "$@" #Pass pparams
+        # declare opt cluster; declare -a vargs
+        # getopt opt cluster vargs "$@" #Pass pparams
         # set -- "''${vargs[@]}" #update pparams
         # if [[ -z "$opt" ]]; then
-        #   echo "no option found, pparams unmodified
+        #   echo "no option found, pparams unmodified"
         # else
-        #   echo "option found, pparams modified.
+        #   echo "option found, pparams modified."
         # fi
 
         # A found option can be: a short option (-a), the first short 
@@ -254,13 +254,21 @@ rec {
         # (--a-long-opt), or a long option with argument 
         # (--another-opt=myArg). The "returned" array is the remaining
         # unparsed options, possibly prepended with the remaing
-        # short options or argument. 
+        # short options or argument. This function will treat short
+        # options with arguments, e.g. -a9,  as a cluster of options; 
+        # returning -9 with the retparams. These types of options, must 
+        # be handled at the return site, utilizing the getopt_cluster
+        # flag.
         
         getopt(){
-        # The parsed option and return parameters.
+        # The parsed option, custer flag, and return parameters.
         declare -n getopt_retopt="$1"
-        declare -n getopt_retparams="$2"
-        shift 2
+        declare -n getopt_cluster="$2"
+        declare -n getopt_retparams="$3"
+        getopt_retopt=""
+        getopt_cluster=""
+        getopt_retparams=()
+        shift 3
         # The remaining parameters, the first will be analyzed.
         declare token="$1"
         # Local variables for an argument, and leftover short options.
@@ -287,10 +295,10 @@ rec {
           elif [[ ''${#token} -gt 2 ]]; then                  # In a cluster
               getopt_retopt="''${token:0:2}"
               moreopt="-''${token:2}"
+              getopt_cluster="true"
               getopt_retparams=("$moreopt" "''${@:2}")
           fi
         else                                                # No option
-          getopt_retopt=
           getopt_retparams=("$@")
         fi
         }'';
