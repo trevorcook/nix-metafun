@@ -169,7 +169,9 @@ rec {
                                                           "|"+(hyphenate opt.alias) else "");
           mkOptCase = _: opt: ''
               ${option-match opt})
-                ${concatNonEmptySep "\n" [(''[[ -n $option_in_cluster ]] && set -- "''${1#-}" "''${@:2}"'')  
+                ${concatNonEmptySep "\n" [(if opt.arg != null 
+                                              then ''[[ -n $option_in_cluster ]] && set -- "''${1#-}" "''${@:2}"''
+                                              else "")  
                                            opt.hook
                                           (if isNull opt.arg then "" else "shift")
                                           (if opt.exit then "${safe-exit} 0" else "")
